@@ -9,6 +9,7 @@ const timeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTim
 const tag = 'בדיקת-אופליין-' + Date.now().toString(36);
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const ctx = await browser.newContext({ locale: 'he-IL', viewport: { width: 390, height: 844 } });
+await ctx.addInitScript(() => { try { localStorage.setItem('tt-help-seen', '1'); } catch {} });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
@@ -78,6 +79,7 @@ try {
   await ctx.setOffline(false);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   const ctx2 = await browser.newContext({ locale: 'he-IL' });
+  await ctx2.addInitScript(() => { try { localStorage.setItem('tt-help-seen', '1'); } catch {} });
   const p2 = await ctx2.newPage();
   await p2.goto(BASE);
   let synced = false;

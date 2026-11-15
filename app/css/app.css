@@ -235,6 +235,23 @@ input.code { font-size: 28px; letter-spacing: 14px; text-align: center; directio
 .tx .amt small { font-weight: 400; color: var(--ink3); font-size: 17px; }
 .fab { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: max(20px, calc(50% - var(--maxw) / 2 + 24px)); height: 60px; padding: 0 24px 0 26px; border-radius: var(--pill); border: 0; background: var(--sky-btn); color: #04263B; font-size: var(--fs); font-weight: 800; box-shadow: var(--shadow-fab); z-index: 30; display: inline-flex; align-items: center; gap: 8px; transition: transform .12s; }
 .fab span { font-size: 30px; line-height: 1; font-weight: 700; }
+/* "מה זה?" help */
+.topbar .brand { flex: 1; min-width: 0; }
+.help-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: var(--pill); border: 1.5px solid var(--lav); background: #F5F3FF; color: var(--lav-d); font-weight: 800; font-size: var(--fs-sm); white-space: nowrap; cursor: pointer; flex: none; }
+.help-head { display: flex; align-items: center; gap: var(--s2); }
+.help-head h2 { flex: 1; }
+.help-x { width: 44px; height: 44px; flex: none; border: 0; border-radius: var(--pill); background: var(--bg); font-size: 20px; color: var(--ink); }
+.help-lead { color: var(--ink2); margin: var(--s1) 0 var(--s3); }
+.help-lvl { font-size: var(--fs-sm); font-weight: 800; color: var(--ink3); margin: var(--s4) 2px var(--s2); scroll-margin-top: var(--s4); outline: none; }
+.help-step { display: flex; gap: var(--s3); align-items: flex-start; padding: 10px 12px; border-radius: var(--r-sm); background: var(--bg2); margin-bottom: var(--s2); }
+.help-step .n { width: 36px; height: 36px; flex: none; border-radius: var(--pill); background: var(--sky-btn); color: #04263B; display: grid; place-items: center; font-weight: 800; }
+.help-step b, .help-tip b { display: block; }
+.help-step span, .help-tip span { display: block; color: var(--ink2); font-size: var(--fs-sm); line-height: 1.45; }
+.help-tip { display: flex; gap: var(--s3); align-items: flex-start; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.help-tip:last-of-type { border-bottom: 0; }
+.help-tip i { font-style: normal; font-size: 24px; width: 32px; text-align: center; flex: none; }
+.help-more { display: block; width: 100%; margin-top: var(--s3); min-height: 48px; border-radius: var(--pill); border: 1.5px dashed var(--lav); background: #FAF5FF; color: var(--lav-d); font-weight: 800; cursor: pointer; }
+.help-done { margin-top: var(--s4); }
 /* Trip banner row: people · currency · share · PDF. The share pair drops to its own line when it doesn't fit. */
 .tripbar .tb-chips { gap: 6px; flex-wrap: wrap; align-items: center; }
 .tb-chips .chip { min-height: 42px; padding: 4px 12px; }

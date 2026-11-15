@@ -126,11 +126,64 @@ function drawInstall() {
   $('#installX').onclick = () => { snooze(); drawInstall(); };
 }
 
+// ---------------------------------------------------------------- help ("מה זה?")
+// Most common use first; each "▾" opens the next, less common level.
+const HELP_STEPS = [
+  ['פותחים טיול', '"+ טיול חדש": שם, תאריכים, מי נוסע, מטבע וסיסמה של 4 ספרות.'],
+  ['מתעדים כל הוצאה', '"+ להוסיף הוצאה": כמה, על מה, מתי ומי שילם. מטבע זר? מומר לבד.'],
+  ['משתפים עם מי שנוסע איתכם', '"שיתוף" שולח בוואטסאפ קישור (ואם רוצים – גם את הסיסמה). כולם רואים ומוסיפים.'],
+  ['מתחשבנים', 'בלשונית "התחשבנות" רואים מי מעביר כמה למי.']
+];
+const HELP_MORE = [
+  ['📊', 'לאן הלך הכסף', '"פילוח" לפי קטגוריה או לפי יום, וממוצע ליום ולאדם. לחיצה על שורה מביאה את ההוצאות שלה לראש הרשימה.'],
+  ['👨‍👩‍👧', 'זוגות ומשפחות', `מחלקים לקבוצות (עד ${L.MAX_GROUPS}), וכל קבוצה מתחשבנת כמו אדם אחד.`],
+  ['↩️', 'החזר כספי', 'קיבלתם כסף בחזרה? מוסיפים "הכנסה" והיא יורדת מהסך הכול.'],
+  ['✏️', 'טעיתם?', '✏️ לעריכה ו-🗑️ למחיקה בכל הוצאה. 🔍 חיפוש לפי מילה או שם.'],
+  ['📄', 'סיכום ל-PDF', 'כפתור PDF בראש הטיול – דוח מסודר של כל ההוצאות, לשמירה או לשליחה.']
+];
+const HELP_PRO = [
+  ['✈️', 'עובד בלי אינטרנט', 'במטוס או בלי קליטה – רושמים כרגיל, הכול מסתנכרן כשחוזרת הרשת.'],
+  ['📷', 'קבלה ומיקום', 'אפשר לצרף צילום קבלה, והמקום נשמר על המפה.'],
+  ['💱', 'שער המרה', 'השער נלקח אוטומטית; אפשר להקליד שער משלכם.'],
+  ['🔒', 'סיסמת הטיול', 'נזכרת במכשיר ל-3 ימים, ואז מבקשים שוב.'],
+  ['📲', 'אפליקציה במסך הבית', '"התקנה" מוסיפה אייקון לטלפון, כמו אפליקציה רגילה.'],
+  ['🎨', 'צבע וקטגוריות', '✏️ בראש הטיול: צבע, תאריכים ומשתתפים. קטגוריה חדשה – ישר מתוך הוספת הוצאה.']
+];
+function helpSheet() {
+  helpShown = true; // also counts when storage is full/blocked
+  try { localStorage.setItem('tt-help-seen', '1'); } catch {}
+  const tips = list => list.map(([ic, t, d]) => `<div class="help-tip"><i aria-hidden="true">${ic}</i><div><b>${esc(t)}</b><span>${esc(d)}</span></div></div>`).join('');
+  const m = modal(`<div class="help-head"><h2>❓ מה זה טיולון?</h2><button type="button" class="help-x" data-x title="סגירה" aria-label="סגירה">✕</button></div>
+    <p class="help-lead">מתעדים את כל הוצאות הטיול במקום אחד – כמה, על מה, מתי ואיפה – ורואים לאן הלך הכסף. נוסעים יחד? האפליקציה גם אומרת בסוף מי חייב למי.</p>
+    <div class="help-lvl">איך מתחילים</div>
+    ${HELP_STEPS.map(([t, d], i) => `<div class="help-step"><span class="n num" aria-hidden="true">${i + 1}</span><div><b>${esc(t)}</b><span>${esc(d)}</span></div></div>`).join('')}
+    <button type="button" class="help-more" data-lvl="more" aria-expanded="false" aria-controls="help-more">רוצים לדעת עוד? ▾</button>
+    <div id="help-more" hidden><div class="help-lvl" tabindex="-1">עוד דברים שימושיים</div>${tips(HELP_MORE)}
+      <button type="button" class="help-more" data-lvl="pro" aria-expanded="false" aria-controls="help-pro">למתקדמים ▾</button></div>
+    <div id="help-pro" hidden><div class="help-lvl" tabindex="-1">למתקדמים</div>${tips(HELP_PRO)}</div>
+    <button type="button" class="btn primary block help-done" data-x>הבנתי 👍</button>`, { sheet: true, label: 'מה זה טיולון?' });
+  m.el.classList.add('help');
+  setTimeout(() => $('.help-x', m.el)?.focus({ preventScroll: true }), 50);
+  $$('[data-x]', m.el).forEach(b => b.onclick = () => m.close());
+  $$('[data-lvl]', m.el).forEach(b => b.onclick = () => {
+    const sec = $('#help-' + b.dataset.lvl, m.el);
+    sec.hidden = false; b.remove();
+    const head = sec.querySelector('.help-lvl');
+    head.focus({ preventScroll: true }); // the button is gone: keep keyboard/reader focus on the new part
+    head.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  });
+}
+// A function declaration (hoisted): homePage() runs while this module is still loading.
+// Key 'tt-help-seen' is written in helpSheet() too.
+var helpShown = false; // var: hoisted like helpSeen
+function helpSeen() { if (helpShown) return true; try { return localStorage.getItem('tt-help-seen') === '1'; } catch { return true; } }
+
 // ---------------------------------------------------------------- home
 function homePage() {
   view.innerHTML = `
     <header class="topbar">
       <div class="brand"><h1>🧳 טיולון</h1><span class="muted">הוצאות משותפות לטיול</span></div>
+      <button type="button" class="help-pill" id="helpBtn">❓ מה זה?</button>
       <button class="icon-btn" id="adminBtn" title="פאנל ניהול" aria-label="פאנל ניהול">⚙️</button>
     </header>
     <div class="wrap">
@@ -140,6 +193,11 @@ function homePage() {
       <p class="version muted small center">גרסה <span class="num" dir="ltr">${esc(window.TT_VERSION || '?')}</span></p>
     </div>`;
   $('#adminBtn').onclick = askAdmin;
+  $('#helpBtn').onclick = helpSheet;
+  if (!helpSeen()) { // first visit on this device: open once
+    const timer = setTimeout(() => { if ($('#helpBtn') && !$('.scrim') && !helpSeen()) helpSheet(); }, 300);
+    cleanups.push(() => clearTimeout(timer));
+  }
   drawInstall();
   addEventListener('tt-install', drawInstall); cleanups.push(() => removeEventListener('tt-install', drawInstall));
   const host = $('#trips');
@@ -575,7 +633,7 @@ function peoplePopup(st) {
   $('[data-g]', m.el).onclick = () => { m.close(); groupsSheet(st); };
 }
 
-const GROUP_COLORS = ['#38BDF8', '#A78BFA', '#F472B6', '#34D399', '#FBBF24'];
+const GROUP_COLORS = ['#38BDF8', '#A78BFA', '#F472B6', '#34D399', '#FBBF24', '#FB923C', '#2DD4BF', '#818CF8', '#A3E635', '#F87171']; // one per group, MAX_GROUPS long
 function groupsSheet(st) {
   const t = st.trip;
   // Work on a copy. A name the user didn't type stays '', so the shown name follows the members.

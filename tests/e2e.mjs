@@ -19,6 +19,25 @@ const toastText = async () => (await page.locator('#toast').textContent()).trim(
 try {
   await page.goto(BASE + '?demo');
   await page.waitForSelector('.trip-card', { timeout: 15000 });
+  // "מה זה?" help: opens by itself on the first visit, levels open one at a time
+  await page.waitForSelector('.sheet.help', { timeout: 3000 }).catch(() => {});
+  ok('help opens by itself on first visit', await page.locator('.sheet.help').count() === 1);
+  ok('help: 4 basic steps, lead mentions documenting', await page.locator('.help .help-step').count() === 4 && (await page.locator('.help-lead').textContent()).includes('מתעדים'));
+  ok('help: more levels hidden at first', await page.locator('#help-more').isHidden() && await page.locator('#help-pro').isHidden());
+  await shot('00a-help');
+  await page.click('[data-lvl=more]');
+  ok('help: "רוצים לדעת עוד" opens level 2 only', await page.locator('#help-more').isVisible() && await page.locator('#help-pro').isHidden());
+  await page.click('[data-lvl=pro]');
+  ok('help: "למתקדמים" opens level 3', await page.locator('#help-pro').isVisible() && await page.locator('#help-pro .help-tip').count() === 6);
+  await noHScroll('help');
+  await page.click('.help-done'); await page.waitForTimeout(300);
+  ok('help closes with הבנתי', await page.locator('.sheet.help').count() === 0);
+  await page.reload(); await page.waitForSelector('.trip-card'); await page.waitForTimeout(600);
+  ok('help does not open again by itself', await page.locator('.sheet.help').count() === 0);
+  ok('"מה זה?" pill in top bar', (await page.locator('.topbar #helpBtn').textContent()).includes('מה זה?'));
+  await page.click('#helpBtn'); await page.waitForSelector('.sheet.help');
+  ok('pill opens help', await page.locator('.sheet.help').count() === 1);
+  await page.click('.help-x'); await page.waitForTimeout(300);
   ok('home shows seeded trip', await page.locator('.trip-card').count() === 1);
   ok('demo banner', await page.locator('.demo-bar').isVisible());
   await noHScroll('home'); await shot('01-home');

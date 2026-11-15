@@ -148,14 +148,14 @@ export function settleTransfers(balanceList) {
 }
 
 // ---------- groups (couples / families settle as one) ----------
-export const MAX_GROUPS = 5;
+export const MAX_GROUPS = 10;
 
 export function groupName(members) {
   if (members.length < 2) return members[0] || '';
   return `${members.slice(0, -1).join(', ')} ו${members[members.length - 1]}`;
 }
 
-// Keeps only participants, each person in one group (first wins), drops empty groups, max 5.
+// Keeps only participants, each person in one group (first wins), drops empty groups, max MAX_GROUPS.
 export function cleanGroups(groups, participants) {
   const inTrip = new Set(participants), used = new Set(), out = [];
   for (const g of groups || []) {

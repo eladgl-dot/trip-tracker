@@ -168,17 +168,19 @@ test('groupName: from members', () => {
   assert.equal(L.groupName(['א', 'ב', 'ג']), 'א, ב וג');
 });
 
-test('cleanGroups: one group per person, only participants, max 5, no empty, default names', () => {
+test('cleanGroups: one group per person, only participants, max 10, no empty, default names', () => {
+  assert.equal(L.MAX_GROUPS, 10);
+  const solo = ['ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ'];
   const g = L.cleanGroups([
     { name: '', members: ['א', 'ב'] },
     { name: 'זוג', members: ['ב', 'ג', 'זר'] }, // ב already taken, זר not in trip
     { name: 'ריק', members: [] },
-    { members: ['ד'] }, { members: ['ה'] }, { members: ['ו'] }, { members: ['ז'] }
-  ], ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז']);
+    ...solo.map(p => ({ members: [p] }))
+  ], ['א', 'ב', 'ג', ...solo]);
   assert.equal(g.length, L.MAX_GROUPS);
   assert.deepEqual(g[0], { name: 'א וב', members: ['א', 'ב'] });
   assert.deepEqual(g[1], { name: 'זוג', members: ['ג'] });
-  assert.deepEqual(g.map(x => x.members[0]), ['א', 'ג', 'ד', 'ה', 'ו']);
+  assert.deepEqual(g.map(x => x.members[0]), ['א', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט', 'י', 'כ']);
   assert.deepEqual(L.cleanGroups(undefined, ['א']), []);
 });
 
