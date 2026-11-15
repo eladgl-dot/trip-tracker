@@ -15,7 +15,7 @@ Admin code: stored as a hash in `app/config.js` (`ADMIN_HASH`). To change it, op
 Firestore → **Rules** → paste `firestore.rules` → **Publish**. Until then the real mode shows "אין הרשאה".
 
 ## Tests
-- Logic: `node --test tests/logic.test.mjs`
+- Logic: `node --test tests/logic.test.mjs tests/rates.test.mjs`
 - Browser end-to-end: see `docs/plans/trip-tracker-plan.md` (Playwright script, demo mode)
 
 ## Files

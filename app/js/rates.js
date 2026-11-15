@@ -37,3 +37,22 @@ export async function getRate(from, to) {
   if (back?.rate > 0) return { rate: 1 / back.rate, source: 'cache', at: back.at };
   throw new Error('no rate');
 }
+
+// While online, keep every currency → trip currency rate on the phone (one call, at most every 6 hours),
+// so expenses in any currency get a rate on a plane or abroad without signal.
+const PREFETCH = 'tt-rates-at:';
+export async function prefetchRates(base, now = Date.now()) {
+  let last = 0;
+  try { last = Number(localStorage.getItem(PREFETCH + base)) || 0; } catch {}
+  if (now - last < 6 * 3600e3) return;
+  try {
+    const j = await fetchJson(`https://open.er-api.com/v6/latest/${base}`);
+    if (j?.result !== 'success' || !j.rates) return;
+    for (const [code, r] of Object.entries(j.rates)) {
+      if (code === base || !(r > 0)) continue;
+      remember(code, base, 1 / r);
+      remember(base, code, r);
+    }
+    try { localStorage.setItem(PREFETCH + base, String(now)); } catch {}
+  } catch {} // offline or blocked: try again next time
+}

@@ -1,5 +1,5 @@
 ﻿// App-shell cache. Bump VERSION whenever app files change so phones pick up the new build.
-const VERSION = 'tt-v8';
+const VERSION = 'tt-v9';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './config.js', './css/app.css',
   './js/app.js', './js/logic.js', './js/ui.js', './js/charts.js', './js/store.js',

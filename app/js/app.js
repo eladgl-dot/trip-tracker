@@ -4,7 +4,7 @@ import * as L from './logic.js';
 import { esc, $, $$, toast, modal, confirmBox, codePrompt, reportError, formatDate, dateRange, todayIso, closeAll } from './ui.js';
 import { donut, bars } from './charts.js';
 import { hashPin, checkPin, hashAdmin } from './pin.js';
-import { getRate } from './rates.js';
+import { getRate, prefetchRates } from './rates.js';
 import { watchLocation, fillAddresses } from './geo.js';
 import { shrinkImage } from './photo.js';
 import { ADMIN_HASH } from '../config.js';
@@ -432,7 +432,10 @@ async function tripPage(id) {
   cleanups.push(store.onTrip(id, trip => {
     if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
     st.trip = trip; if (gotExpenses) drawAll();
+    prefetchRates(trip.defaultCurrency); // keep rates on the phone for offline (at most every 6 h)
   }, reportError));
+  const onOnline = () => st.trip && prefetchRates(st.trip.defaultCurrency);
+  addEventListener('online', onOnline); cleanups.push(() => removeEventListener('online', onOnline));
   cleanups.push(store.onExpenses(id, list => {
     st.expenses = list; gotExpenses = true; drawAll();
     fillAddresses(id, list, (tid, eid, patch) => fire(store.patchExpense(tid, eid, patch)));
