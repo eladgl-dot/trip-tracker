@@ -14,7 +14,6 @@ page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 const shot = n => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: true });
 const noHScroll = async n => ok(`no horizontal scroll (${n})`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-const tapRing = async host => { await page.locator(host + ' .donut').evaluate(el => el.scrollIntoView({ block: 'start' })); const b = await page.locator(host + ' .donut').boundingBox(); await page.mouse.click(b.x + b.width / 2 + b.width * 0.379, b.y + b.height / 2); };
 const toastText = async () => (await page.locator('#toast').textContent()).trim();
 
 try {
@@ -78,11 +77,27 @@ try {
   await page.locator('.trip-card').click(); await page.waitForSelector('#stats .stat');
 
   // charts
-  await tapRing('#chart');
-  const center = await page.locator('#chart .donut-center').textContent();
-  ok('tap slice shows sum + %', center.includes('%') && center.includes('לינה'), center.trim());
-  await page.locator('.legend button').nth(1).click();
-  ok('tap legend row', (await page.locator('#chart .donut-center').textContent()).includes('השכרת רכב'));
+  ok('breakdown rows (no donut)', await page.locator('#chart .bd-row').count() >= 2 && await page.locator('.donut').count() === 0);
+  ok('biggest category first with amount + %', /לינה[\s\S]*%/.test(await page.locator('#chart .bd-row').first().textContent()));
+  await page.locator('#chart .bd-row').nth(1).click();
+  const info = await page.locator('#chart .bd-row.on .bd-info').textContent();
+  ok('tap row shows count', info.includes('תנועות'), info.trim());
+  await noHScroll('breakdown'); await shot('02c-breakdown');
+  // header: no "טיולון" bar, back/edit inside banner, one participants pill, slim bar on scroll
+  ok('no old top bar on trip page', await page.locator('#view .topbar').count() === 0);
+  ok('back + edit in banner', await page.locator('#hero a.ib[href="#/"]').count() === 1 && await page.locator('#hero [data-edit-trip]').count() === 1);
+  ok('one participants pill', /משתתפים \(4\)/.test(await page.locator('#hero [data-people]').textContent()) && await page.locator('#hero .chip').count() === 2);
+  await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(300);
+  ok('slim bar hidden at top', !(await page.locator('#miniBar').getAttribute('class')).includes('on'));
+  await page.evaluate(() => scrollTo(0, 900)); await page.waitForTimeout(400);
+  ok('slim bar shows when scrolled', (await page.locator('#miniBar').getAttribute('class')).includes('on'));
+  ok('slim bar: name + days · net', /ימים/.test(await page.locator('#miniBar').textContent()));
+  await page.screenshot({ path: `${OUT}/02d-slim-bar.png` });
+  await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(300);
+  ok('PDF next to share', await page.locator('.share-row #pdf').count() === 1 && await page.locator('.toolbar #pdf').count() === 0);
+  await page.click('#hero [data-people]'); await page.waitForSelector('.people-list');
+  ok('people popup lists all', await page.locator('.people-list li').count() === 4);
+  await shot('02e-people'); await page.click('.dialog [data-x]'); await page.waitForTimeout(250);
   await page.click('[data-ch=day]');
   await page.locator('.bar').first().click();
   const tip = await page.locator('.tip').textContent();
@@ -161,20 +176,53 @@ try {
   await noHScroll('settle'); await shot('05-settle');
   await page.click('[data-who="ליב"]');
   ok('filter dims others', await page.locator('#settle .person.dim').count() === 3);
-  await tapRing('#pie2');
-  ok('settle pie tappable', (await page.locator('#pie2 .donut-center').textContent()).includes('%'));
+  ok('settle chart uses rows', await page.locator('#pie2 .bd-row').count() >= 1);
   await shot('06-settle-filter');
+  await page.click('[data-who=""]');
+
+  // groups
+  ok('groups banner shown', await page.locator('#settle .grp-banner').count() === 1);
+  await page.click('#settle .grp-banner [data-groups]'); await page.waitForSelector('.pool');
+  const names = await page.locator('.pool [data-in]').evaluateAll(b => b.map(x => x.dataset.in));
+  await page.click(`.pool [data-in="${names[0]}"]`); await page.click(`.pool [data-in="${names[1]}"]`);
+  ok('first tap opens a group', await page.locator('.grp').count() === 1 && await page.locator('.grp .chip.in').count() === 2);
+  ok('picked people leave the pool', await page.locator('.pool [data-in]').count() === names.length - 2);
+  await page.click('[data-newg]'); await page.click(`.pool [data-in="${names[2]}"]`);
+  ok('second group gets the next tap', await page.locator('.grp').nth(1).locator('.chip.in').count() === 1);
+  ok('auto group name', (await page.locator('.grp input').first().getAttribute('placeholder')) === `${names[0]} ו${names[1]}`);
+  await shot('06b-groups-sheet');
+  await page.click('.sheet [data-save]'); await page.waitForTimeout(400);
+  ok('settle shows 3 units', await page.locator('#settle .person').count() === 3);
+  ok('group bar shown', /2 קבוצות · 1 לבד/.test(await page.locator('#settle .gbar').textContent()));
+  const gsum = await page.evaluate(() => [...document.querySelectorAll('#settle .bal .money')].reduce((a, e) => a + parseFloat(e.textContent.replace(/[^\d.\-−]/g, '').replace('−', '-')), 0));
+  ok('group balances sum to ~0', Math.abs(gsum) < 0.05, gsum.toFixed(2));
+  ok('transfers between units', await page.locator('#settle .xfer').count() <= 2);
+  await noHScroll('settle groups'); await shot('06c-settle-groups');
+  await page.click('#hero [data-people]'); await page.waitForSelector('.people-list');
+  ok('popup shows group tag', await page.locator('.people-list .chip').count() === 3);
+  await page.click('.dialog [data-g]'); await page.waitForSelector('.grp');
+  ok('popup button opens groups sheet', await page.locator('.grp').count() === 2);
+  await page.locator('.grp').first().locator('[data-delg]').click();
+  await page.locator('.grp').first().locator('[data-delg]').click();
+  await page.click('.sheet [data-save]'); await page.waitForTimeout(400);
+  ok('groups removed → 4 people again', await page.locator('#settle .person').count() === 4);
+  await page.click('#settle [data-hide-banner]');
+  ok('banner hidden, bottom button stays', await page.locator('#settle .grp-banner').count() === 0 && await page.locator('#settle [data-groups]').count() === 1);
 
   // edit trip
-  await page.click('#editTrip'); await page.waitForSelector('#f-name');
+  await page.click('#hero [data-edit-trip]'); await page.waitForSelector('#f-name');
+  ok('8 color swatches', await page.locator('[data-color]').count() === 8);
+  await page.click('[data-color=mint]');
   await page.locator('#f-chips [data-rm]').first().click(); // אלעד has transactions
   ok('cannot remove participant with transactions', (await toastText()).includes('אי אפשר'));
   await page.fill('#f-person', 'דנה'); await page.click('#f-add');
   await page.click('.sheet button.primary'); await page.waitForTimeout(400);
-  ok('participant added', (await page.locator('#hero').textContent()).includes('דנה'));
+  ok('participant added', /משתתפים \(5\)/.test(await page.locator('#hero [data-people]').textContent()));
+  const heroStyle = await page.locator('#hero').getAttribute('style');
+  ok('trip color applied', /D1FAE5|209, 250, 229/i.test(heroStyle), heroStyle);
 
   // currency change EUR -> ILS
-  await page.click('#editTrip'); await page.waitForSelector('#f-cur');
+  await page.click('#hero [data-edit-trip]'); await page.waitForSelector('#f-cur');
   await page.selectOption('#f-cur', 'ILS'); await page.click('.sheet button.primary');
   await page.waitForSelector('.dialog [data-ok]', { timeout: 15000 });
   await page.click('.dialog [data-ok]'); await page.waitForTimeout(600);

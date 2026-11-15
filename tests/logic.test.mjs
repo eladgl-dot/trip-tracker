@@ -160,3 +160,58 @@ test('shareUrl: WhatsApp link with the whole message encoded', () => {
   const u = L.shareUrl('א b\n&');
   assert.equal(u, 'https://wa.me/?text=' + encodeURIComponent('א b\n&'));
 });
+
+// ---------- groups (Step 14) ----------
+test('groupName: from members', () => {
+  assert.equal(L.groupName(['דני']), 'דני');
+  assert.equal(L.groupName(['דני', 'רותי']), 'דני ורותי');
+  assert.equal(L.groupName(['א', 'ב', 'ג']), 'א, ב וג');
+});
+
+test('cleanGroups: one group per person, only participants, max 5, no empty, default names', () => {
+  const g = L.cleanGroups([
+    { name: '', members: ['א', 'ב'] },
+    { name: 'זוג', members: ['ב', 'ג', 'זר'] }, // ב already taken, זר not in trip
+    { name: 'ריק', members: [] },
+    { members: ['ד'] }, { members: ['ה'] }, { members: ['ו'] }, { members: ['ז'] }
+  ], ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז']);
+  assert.equal(g.length, L.MAX_GROUPS);
+  assert.deepEqual(g[0], { name: 'א וב', members: ['א', 'ב'] });
+  assert.deepEqual(g[1], { name: 'זוג', members: ['ג'] });
+  assert.deepEqual(g.map(x => x.members[0]), ['א', 'ג', 'ד', 'ה', 'ו']);
+  assert.deepEqual(L.cleanGroups(undefined, ['א']), []);
+});
+
+test('groupBalances: groups sum members, people alone stay, sums to zero', () => {
+  const bal = L.balances(['דני', 'רותי', 'יוסי', 'מיכל', 'אבי'],
+    [ex('דני', 2500), ex('רותי', 120), ex('יוסי', 215)]);
+  const u = L.groupBalances(bal, [{ name: 'דני ורותי', members: ['דני', 'רותי'] }, { name: 'יוסי ומיכל', members: ['יוסי', 'מיכל'] }]);
+  assert.deepEqual(u.map(x => x.name), ['דני ורותי', 'יוסי ומיכל', 'אבי']);
+  assert.deepEqual(u.map(x => x.members.length), [2, 2, 1]);
+  assert.equal(u[0].isGroup, true); assert.equal(u[2].isGroup, false);
+  assert.equal(u[0].paid, 2620); assert.equal(u[0].share, 1134);
+  assert.equal(u[0].balance, 1486); assert.equal(u[1].balance, -919); assert.equal(u[2].balance, -567);
+  const t = L.settleTransfers(u);
+  assert.deepEqual(t, [{ from: 'יוסי ומיכל', to: 'דני ורותי', amount: 919 }, { from: 'אבי', to: 'דני ורותי', amount: 567 }]);
+});
+
+test('groupBalances: no groups = same as people', () => {
+  const bal = L.balances(['א', 'ב'], [ex('א', 10)]);
+  assert.deepEqual(L.groupBalances(bal, []).map(x => [x.name, x.balance]), [['א', 5], ['ב', -5]]);
+});
+
+// ---------- trip color (Step 16) ----------
+test('tripColor: known key, else default', () => {
+  assert.equal(L.TRIP_COLORS.length, 8);
+  assert.equal(L.tripColor('mint').key, 'mint');
+  assert.equal(L.tripColor('nope').key, L.TRIP_COLORS[0].key);
+  assert.equal(L.tripColor(undefined).key, 'sky');
+});
+
+test('groupBalances: names stay unique (group named like a person / two same names)', () => {
+  const bal = L.balances(['א', 'ב', 'ג', 'ד', 'ה'], [ex('א', 50)]);
+  const u = L.groupBalances(bal, [{ name: 'ה', members: ['א', 'ב'] }, { name: 'ה', members: ['ג', 'ד'] }]);
+  const names = u.map(x => x.name);
+  assert.equal(new Set(names).size, names.length, names.join('|'));
+  assert.ok(names.includes('ה'), 'the person keeps their own name');
+});

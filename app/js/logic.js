@@ -147,6 +147,57 @@ export function settleTransfers(balanceList) {
   return out;
 }
 
+// ---------- groups (couples / families settle as one) ----------
+export const MAX_GROUPS = 5;
+
+export function groupName(members) {
+  if (members.length < 2) return members[0] || '';
+  return `${members.slice(0, -1).join(', ')} ו${members[members.length - 1]}`;
+}
+
+// Keeps only participants, each person in one group (first wins), drops empty groups, max 5.
+export function cleanGroups(groups, participants) {
+  const inTrip = new Set(participants), used = new Set(), out = [];
+  for (const g of groups || []) {
+    const members = (g.members || []).filter(p => inTrip.has(p) && !used.has(p));
+    if (!members.length) continue;
+    members.forEach(p => used.add(p));
+    out.push({ name: (g.name || '').trim() || groupName(members), members });
+    if (out.length === MAX_GROUPS) break;
+  }
+  return out;
+}
+
+// Sums per-person balances into groups; people not in a group stay as they are. Groups come first.
+export function groupBalances(balanceList, groups) {
+  const byName = new Map(balanceList.map(b => [b.name, b]));
+  const used = new Set();
+  const sum = (members, key) => round2(members.reduce((a, p) => a + byName.get(p)[key], 0));
+  const units = [];
+  // Transfers are matched by name, so a group never takes a person's name or another group's.
+  const grouped = new Set((groups || []).flatMap(g => g.members || []));
+  const taken = new Set(balanceList.map(b => b.name).filter(n => !grouped.has(n)));
+  const unique = n => { let x = n, i = 2; while (taken.has(x)) x = `${n} (${i++})`; taken.add(x); return x; };
+  for (const g of groups || []) {
+    const members = g.members.filter(p => byName.has(p) && !used.has(p));
+    if (!members.length) continue;
+    members.forEach(p => used.add(p));
+    units.push({ name: unique(g.name || groupName(members)), members, isGroup: true,
+      paid: sum(members, 'paid'), received: sum(members, 'received'), share: sum(members, 'share'), balance: sum(members, 'balance') });
+  }
+  for (const b of balanceList) if (!used.has(b.name)) units.push({ ...b, members: [b.name], isGroup: false });
+  return units;
+}
+
+// ---------- trip color ----------
+export const TRIP_COLORS = [
+  { key: 'sky', name: 'תכלת-סגול', from: '#E0F2FE', to: '#EDE9FE' }, { key: 'mint', name: 'מנטה', from: '#D1FAE5', to: '#E0F2FE' },
+  { key: 'peach', name: 'אפרסק', from: '#FFE4E6', to: '#FEF3C7' }, { key: 'sun', name: 'שמש', from: '#FEF9C3', to: '#FFEDD5' },
+  { key: 'lav', name: 'לבנדר', from: '#EDE9FE', to: '#FCE7F3' }, { key: 'ocean', name: 'ים', from: '#CFFAFE', to: '#DBEAFE' },
+  { key: 'sand', name: 'חול', from: '#F5F5F4', to: '#FEF3C7' }, { key: 'rose', name: 'ורוד', from: '#FCE7F3', to: '#FFE4E6' }
+];
+export const tripColor = key => TRIP_COLORS.find(c => c.key === key) || TRIP_COLORS[0];
+
 // ---------- search ----------
 export function matchesSearch(e, query) {
   const q = query.trim().toLowerCase();

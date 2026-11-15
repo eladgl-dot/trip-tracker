@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import * as L from './logic.js';
 import { esc, $, $$, toast, modal, confirmBox, codePrompt, reportError, formatDate, dateRange, todayIso, closeAll } from './ui.js';
-import { donut, bars } from './charts.js';
+import { breakdown, bars } from './charts.js';
 import { hashPin, checkPin, hashAdmin } from './pin.js';
 import { getRate, prefetchRates } from './rates.js';
 import { watchLocation, fillAddresses } from './geo.js';
@@ -157,7 +157,7 @@ function homePage() {
     host.innerHTML = trips.map(t => {
       const left = accessLeft(t.id);
       const days = Math.ceil(left / 86400000);
-      return `<article class="card trip-card" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
+      return `<article class="card trip-card" style="background:${tripBg(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
         <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
         <h3>${esc(t.name)}</h3>
         <div class="muted">📍 ${esc(t.location)}</div>
@@ -230,6 +230,9 @@ function tripFormHtml(t, withPin) {
       <p class="err" style="grid-column:1/-1"></p>
     </div>
     <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">מטבע ברירת מחדל *</label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
+    <div class="field"><span class="lbl" id="f-color-l">צבע הטיול</span>
+      <div class="swatches" id="f-color" role="radiogroup" aria-labelledby="f-color-l">${L.TRIP_COLORS.map(c => `<button type="button" role="radio" class="sw"
+        data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${c.name}" title="${c.name}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
     <div class="field" data-f="participants">
       <label class="lbl" for="f-person">משתתפים * <span class="small">(⭐ = ברירת המחדל ב"מי שילם"; לחיצה על שם הופכת אותו לראשון)</span></label>
       <div class="chips" id="f-chips" style="margin-bottom:8px"></div>
@@ -263,6 +266,11 @@ function bindTripForm(root, t, lockedNames = new Set()) {
   };
   $('#f-add', root).onclick = add;
   input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  let color = L.tripColor(t.color).key;
+  $$('[data-color]', root).forEach(b => b.onclick = () => {
+    color = b.dataset.color;
+    $$('[data-color]', root).forEach(x => x.setAttribute('aria-checked', x === b));
+  });
   const pin = $('#f-pin', root);
   if (pin) pin.addEventListener('input', () => pin.value = pin.value.replace(/\D/g, '').slice(0, 4));
   draw();
@@ -272,7 +280,7 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     const data = {
       name: $('#f-name', root).value.trim(), location: $('#f-loc', root).value.trim(),
       startDate: $('#f-start', root).value, endDate: $('#f-end', root).value,
-      defaultCurrency: $('#f-cur', root).value, participants: [...people]
+      defaultCurrency: $('#f-cur', root).value, participants: [...people], color
     };
     if (pin) data.pin = pin.value;
     const errors = L.validateTrip(data);
@@ -320,12 +328,8 @@ async function tripPage(id) {
 
   const build = () => {
     view.innerHTML = `
-      <header class="topbar">
-        <a class="icon-btn" href="#/" title="לכל הטיולים" aria-label="לכל הטיולים">→</a>
-        <span class="muted">טיולון</span>
-        <button class="icon-btn" id="editTrip" title="עריכת פרטי טיול" aria-label="עריכת פרטי טיול">✏️</button>
-      </header>
-      <section class="hero" id="hero"></section>
+      <header class="tripbar" id="hero"></header>
+      <header class="tripbar mini-bar" id="miniBar" aria-hidden="true"></header>
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="list">הוצאות וסיכומים</button>
         <button role="tab" data-tab="settle">התחשבנות</button>
@@ -337,7 +341,6 @@ async function tripPage(id) {
           <div id="chart"></div></div>
         <div class="toolbar">
           <input class="search" id="search" type="search" placeholder="🔍 חיפוש: פירוט, הערה, קטגוריה, משלם" aria-label="חיפוש תנועות">
-          <button class="btn ghost" id="pdf" title="ייצוא PDF">📄 PDF</button>
         </div>
         <div id="txList" style="display:grid;gap:var(--s3)"></div>
       </div>
@@ -345,9 +348,21 @@ async function tripPage(id) {
         <div class="filter" id="who" role="group" aria-label="סינון לפי משתתף"></div>
         <div class="wrap" style="margin-top:var(--s3)" id="settle"></div>
       </div>
-      <div class="share-row"><button class="wa" id="share">${WA_ICON}לשתף את הוצאות הטיול</button></div>
+      <div class="share-row"><button class="wa" id="share">${WA_ICON}לשתף את הוצאות הטיול</button><button class="pdf-btn" id="pdf">📄 ייצוא PDF</button></div>
       <button class="fab" id="fab"><span aria-hidden="true">+</span>להוסיף הוצאה</button>`;
-    $('#editTrip').onclick = () => editTripSheet(st);
+    // Material-style: when the big banner scrolls away, a slim bar stays at the top.
+    const io = new IntersectionObserver(([en]) => {
+      const show = !en.isIntersecting && en.boundingClientRect.top < 0;
+      $('#miniBar').classList.toggle('on', show); $('#miniBar').setAttribute('aria-hidden', !show);
+    });
+    io.observe($('#hero')); cleanups.push(() => io.disconnect());
+    const onClick = e => {
+      if (e.target.closest('[data-edit-trip]')) editTripSheet(st);
+      else if (e.target.closest('[data-people]')) peoplePopup(st);
+      else if (e.target.closest('[data-groups]')) groupsSheet(st);
+      else if (e.target.closest('[data-hide-banner]')) { try { localStorage.setItem('tt-grp-banner-' + st.trip.id, '0'); } catch {} drawSettle(); }
+    };
+    view.addEventListener('click', onClick); cleanups.push(() => view.removeEventListener('click', onClick));
     $('#share').onclick = () => shareTrip(st.trip);
     $('#fab').onclick = () => expenseSheet(st, null, 'expense');
     $$('[data-tab]').forEach(b => b.onclick = () => { st.tab = b.dataset.tab; drawTabs(); });
@@ -366,11 +381,19 @@ async function tripPage(id) {
   const drawHero = () => {
     const t = st.trip;
     const len = t.startDate && t.endDate ? L.daysBetween(t.startDate, t.endDate) : 0;
-    $('#hero').innerHTML = `
-      <h1>${esc(t.name)}</h1>
-      <div class="muted">📍 ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
-      <div class="chips">${t.participants.map(p => `<span class="chip">${esc(p)}</span>`).join('')}
+    const bg = tripBg(t.color);
+    const btns = title => [`<a class="ib" href="#/" title="לכל הטיולים" aria-label="לכל הטיולים">→</a>`, title,
+      `<button class="ib" data-edit-trip title="עריכת פרטי טיול" aria-label="עריכת פרטי טיול">✏️</button>`].join('');
+    const hero = $('#hero');
+    hero.style.background = bg;
+    hero.innerHTML = `<div class="tb-row">${btns(`<h1>${esc(t.name)}</h1>`)}</div>
+      <div class="tb-meta">📍 ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
+      <div class="chips"><button type="button" class="chip ppl" data-people>👥 משתתפים (${t.participants.length})</button>
         <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span></div>`;
+    const s = L.summarize(t, st.expenses, todayIso());
+    const mini = $('#miniBar');
+    mini.style.background = bg;
+    mini.innerHTML = `<div class="tb-row">${btns(`<div class="tb-t"><b>${esc(t.name)}</b><span>${s.days} ימים · <bdi class="money">${esc(fmt(s.net))}</bdi></span></div>`)}</div>`;
   };
 
   const drawStats = () => {
@@ -387,7 +410,7 @@ async function tripPage(id) {
   const drawChart = () => {
     $$('[data-ch]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ch === st.chart));
     const host = $('#chart');
-    if (st.chart === 'cat') donut(host, L.byCategory(st.expenses), { title: 'סה"כ הוצאות', fmt, label: n => `${L.categoryEmoji(n)} ${n}` });
+    if (st.chart === 'cat') breakdown(host, L.byCategory(st.expenses), { fmt, label: n => `${L.categoryEmoji(n)} ${n}` });
     else bars(host, L.byDay(st.expenses), { fmt, total: L.summarize(st.trip, st.expenses).totalExpenses });
   };
 
@@ -443,33 +466,46 @@ async function tripPage(id) {
     $$('[data-who]').forEach(b => b.onclick = () => { st.who = b.dataset.who; drawSettle(); });
 
     const bal = L.balances(t.participants, st.expenses);
-    const transfers = L.settleTransfers(bal);
-    const shown = st.who ? transfers.filter(x => x.from === st.who || x.to === st.who) : transfers;
+    const groups = L.cleanGroups(t.groups, t.participants);
+    const units = L.groupBalances(bal, groups);
+    const transfers = L.settleTransfers(units);
+    const unitOf = Object.fromEntries(units.flatMap(u => u.members.map(p => [p, u.name])));
+    const mine = st.who ? unitOf[st.who] : '';
+    const shown = st.who ? transfers.filter(x => x.from === mine || x.to === mine) : transfers;
     const pieItems = st.who ? L.byCategory(st.expenses.filter(e => e.paidBy === st.who)) : L.byPayer(st.expenses);
+    let bannerOn = true; try { bannerOn = localStorage.getItem('tt-grp-banner-' + t.id) !== '0'; } catch {}
+    const solo = units.filter(u => !u.isGroup).length;
     const host = $('#settle');
     host.innerHTML = `
+      ${groups.length ? `<div class="gbar"><span>👨‍👩‍👧 ${groups.length === 1 ? 'קבוצה אחת' : `${groups.length} קבוצות`}${solo ? ` · ${solo} לבד` : ''}</span>
+          <button type="button" class="btn sm ghost" data-groups>עריכת קבוצות</button></div>`
+        : bannerOn ? `<div class="grp-banner"><button type="button" class="x" data-hide-banner title="הסתרה" aria-label="הסתרת ההודעה">✕</button>
+          <b>👨‍👩‍👧 יש בטיול זוגות או משפחות?</b>
+          <p>אפשר לאחד אנשים לקבוצה, וההתחשבנות תהיה בין הקבוצות: מי מעביר למי – פעם אחת לכל זוג.</p>
+          <button type="button" class="btn primary block" data-groups>לחלק את האנשים לקבוצות</button></div>` : ''}
       <div class="card"><h2>${st.who ? `ההוצאות ששילם/ה ${esc(st.who)} לפי קטגוריה` : 'מי שילם כמה'}</h2><div id="pie2"></div></div>
       <h2 style="margin:var(--s2) var(--s2) 0">יתרות</h2>
-      ${bal.map(b => {
-        const cls = b.balance > 0.009 ? 'pos' : b.balance < -0.009 ? 'neg' : 'zero';
-        return `<div class="card person ${st.who && st.who !== b.name ? 'dim' : ''}">
-          <div class="ava" aria-hidden="true">${esc([...b.name][0] || '?')}</div>
-          <div><b>${esc(b.name)}</b><div class="muted">
-            <span>שילם/ה <bdi class="money">${fmt(b.paid)}</bdi></span> · <span>חלקו/ה <bdi class="money">${fmt(b.share)}</bdi></span>
-            ${b.received ? ` · <span>קיבל/ה החזר <bdi class="money">${fmt(b.received)}</bdi></span>` : ''}</div></div>
-          <span class="bal ${cls}" title="${cls === 'pos' ? 'מגיע לו/ה' : cls === 'neg' ? 'חייב/ת' : 'מאוזן'}"><span class="money">${b.balance > 0.009 ? '+' : ''}${fmt(b.balance)}</span></span>
+      ${units.map(u => {
+        const cls = u.balance > 0.009 ? 'pos' : u.balance < -0.009 ? 'neg' : 'zero';
+        const ini = u.isGroup ? u.members.slice(0, 3).map(p => [...p][0] || '?').join('+') : ([...u.name][0] || '?');
+        const many = u.isGroup;
+        return `<div class="card person ${many ? 'group' : ''} ${st.who && mine !== u.name ? 'dim' : ''}">
+          <div class="ava ${many ? 'multi' : ''}" aria-hidden="true">${esc(ini)}</div>
+          <div><b>${esc(u.name)}</b>${many ? `<div class="members">${u.members.map(esc).join(', ')}</div>` : ''}</div>
+          <span class="bal ${cls}" title="${cls === 'pos' ? 'מגיע' : cls === 'neg' ? 'חייב' : 'מאוזן'}"><span class="money">${u.balance > 0.009 ? '+' : ''}${fmt(u.balance)}</span></span>
+          <div class="muted"><span>${many ? 'שילמו' : 'שילם/ה'} <bdi class="money">${fmt(u.paid)}</bdi></span><span>${many ? 'חלקם' : 'חלקו/ה'} <bdi class="money">${fmt(u.share)}</bdi></span>
+            ${u.received ? `<span>${many ? 'קיבלו' : 'קיבל/ה'} החזר <bdi class="money">${fmt(u.received)}</bdi></span>` : ''}</div>
         </div>`;
       }).join('')}
       <div class="card"><h2>💸 מי מעביר למי ${transfers.length ? `(${transfers.length} העברות)` : ''}</h2>
         ${!transfers.length ? `<p class="muted center">🎉 כולם מאוזנים, אין צורך בהעברות</p>` : !shown.length ? `<p class="muted center">ל${esc(st.who)} אין העברות</p>` :
-          `<div style="display:grid;gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">←</span><span class="muted">מעביר/ה ל</span> <b>${esc(x.to)}</b>
+          `<div style="display:grid;gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">←</span><span class="muted">${units.find(u => u.name === x.from)?.isGroup ? 'מעבירים ל' : 'מעביר/ה ל'}</span> <b>${esc(x.to)}</b>
             <span class="amt money">${fmt(x.amount)}</span></div>`).join('')}</div>`}
-        <p class="hint">חלוקה שווה של ההוצאות נטו בין ${t.participants.length} המשתתפים</p>
-      </div>`;
-    donut($('#pie2'), pieItems, {
-      title: st.who ? `שילם/ה ${st.who}` : 'שולם בסה"כ', fmt,
-      label: n => st.who ? `${L.categoryEmoji(n)} ${n}` : n
-    });
+        ${st.who && mine !== st.who ? `<p class="hint">${esc(st.who)} בקבוצה "${esc(mine)}" – מוצגות ההעברות של הקבוצה</p>` : ''}
+        <p class="hint">חלוקה שווה של ההוצאות נטו בין ${t.participants.length} המשתתפים${groups.length ? `, מקובצים ל-${units.length}` : ''}</p>
+      </div>
+      ${!groups.length && !bannerOn ? `<div class="center" style="margin-top:var(--s2)"><button type="button" class="btn ghost" data-groups>👨‍👩‍👧 לחלק את האנשים לקבוצות</button></div>` : ''}`;
+    breakdown($('#pie2'), pieItems, { fmt, label: n => st.who ? `${L.categoryEmoji(n)} ${n}` : n });
   };
 
   const drawAll = () => {
@@ -492,6 +528,72 @@ async function tripPage(id) {
   }, reportError));
 }
 
+// ---------------------------------------------------------------- trip color, participants, groups
+function tripBg(key) { const c = L.tripColor(key); return `linear-gradient(135deg, ${c.from}, ${c.to})`; }
+
+function peoplePopup(st) {
+  const t = st.trip;
+  const groupOf = Object.fromEntries(L.cleanGroups(t.groups, t.participants).flatMap(g => g.members.map(p => [p, g.name])));
+  const m = modal(`<h2>👥 משתתפים (${t.participants.length})</h2>
+    <ul class="people-list">${t.participants.map(p => `<li><span class="ava" aria-hidden="true">${esc([...p][0] || '?')}</span><span class="pn">${esc(p)}</span>
+      ${groupOf[p] ? `<span class="chip">${esc(groupOf[p])}</span>` : ''}</li>`).join('')}</ul>
+    <div class="row2"><button class="btn ghost" data-g>👨‍👩‍👧 לחלק לקבוצות</button><button class="btn primary" data-x>סגירה</button></div>`, { label: 'משתתפים' });
+  $('[data-x]', m.el).onclick = () => m.close();
+  $('[data-g]', m.el).onclick = () => { m.close(); groupsSheet(st); };
+}
+
+const GROUP_COLORS = ['#38BDF8', '#A78BFA', '#F472B6', '#34D399', '#FBBF24'];
+function groupsSheet(st) {
+  const t = st.trip;
+  // Work on a copy. A name the user didn't type stays '', so the shown name follows the members.
+  const inTrip = new Set(t.participants), seen = new Set();
+  const groups = (t.groups || []).map(g => ({
+    name: g.name || '',
+    members: (g.members || []).filter(p => inTrip.has(p) && !seen.has(p) && seen.add(p))
+  })).filter(g => g.members.length).slice(0, L.MAX_GROUPS);
+  let active = 0;
+  const m = modal(`<h2>חלוקה לקבוצות</h2><p class="muted" style="margin:-8px 0 var(--s3)">כל אדם יכול להיות בקבוצה אחת בלבד. מי שלא בקבוצה מתחשבן לבד.</p>
+    <div id="g-body"></div>
+    <div class="row2" style="margin-top:var(--s4)"><button class="btn ghost" data-x>ביטול</button><button class="btn primary" data-save>שמירה</button></div>`, { sheet: true, label: 'חלוקה לקבוצות' });
+  const body = $('#g-body', m.el);
+  const draw = () => {
+    const used = new Set(groups.flatMap(g => g.members));
+    const free = t.participants.filter(p => !used.has(p));
+    active = Math.max(0, Math.min(active, groups.length - 1));
+    body.innerHTML = `${groups.map((g, i) => `<div class="grp ${i === active ? 'on' : ''}" data-act="${i}" style="--g:${GROUP_COLORS[i]}">
+        <div class="grp-head"><i aria-hidden="true"></i><input data-name="${i}" maxlength="40" value="${esc(g.name)}" placeholder="${esc(L.groupName(g.members) || `קבוצה ${i + 1}`)}" aria-label="שם הקבוצה">
+          <button type="button" class="mini" data-delg="${i}" title="מחיקת קבוצה" aria-label="מחיקת קבוצה">🗑️</button></div>
+        <div class="chips">${g.members.length ? g.members.map(p => `<span class="chip in"><span>${esc(p)}</span><button type="button" data-out="${esc(p)}" aria-label="הוצאת ${esc(p)} מהקבוצה">✕</button></span>`).join('')
+          : `<span class="muted">${i === active ? 'לחצו על שם למטה כדי להוסיף' : 'לחצו כאן ואז על שם למטה'}</span>`}</div></div>`).join('')}
+      <button type="button" class="add-grp" data-newg ${groups.length >= L.MAX_GROUPS ? 'disabled' : ''}>+ קבוצה חדשה (${groups.length} מתוך ${L.MAX_GROUPS})</button>
+      <div class="pool"><div class="pool-l">${free.length ? (groups.length ? 'בלי קבוצה – לחיצה מוסיפה לקבוצה המסומנת' : 'בלי קבוצה – לחיצה פותחת קבוצה חדשה') : 'כולם בקבוצות 👍'}</div>
+        <div class="chips">${free.map(p => `<button type="button" class="chip" data-in="${esc(p)}">${esc(p)} ＋</button>`).join('')}</div></div>`;
+  };
+  body.addEventListener('input', e => { const i = e.target.dataset.name; if (i != null) groups[+i].name = e.target.value; });
+  body.addEventListener('click', e => {
+    if (e.target.matches('input')) return;
+    const el = e.target.closest('button, [data-act]'); if (!el) return;
+    const d = el.dataset;
+    if (d.in != null) {
+      if (!groups.length) { groups.push({ name: '', members: [] }); active = 0; }
+      groups[active].members.push(d.in);
+    } else if (d.out != null) {
+      const g = groups.find(x => x.members.includes(d.out)); g.members = g.members.filter(p => p !== d.out);
+    } else if (d.delg != null) { groups.splice(+d.delg, 1); if (+d.delg < active) active--; }
+    else if (d.newg != null) { if (groups.length < L.MAX_GROUPS) { groups.push({ name: '', members: [] }); active = groups.length - 1; } }
+    else if (d.act != null) { if (+d.act === active) return; active = +d.act; }
+    else return;
+    draw();
+  });
+  draw();
+  $('[data-x]', m.el).onclick = () => m.close();
+  $('[data-save]', m.el).onclick = () => {
+    const out = groups.filter(g => g.members.length).map(g => ({ name: g.name.trim(), members: g.members }));
+    fire(store.updateTrip(t.id, { groups: out }));
+    m.close(); toast(out.length ? 'הקבוצות נשמרו' : 'הקבוצות נמחקו', 'good');
+  };
+}
+
 function editTripSheet(st) {
   const t = st.trip;
   const locked = new Set(st.expenses.map(e => e.paidBy));
@@ -502,6 +604,8 @@ function editTripSheet(st) {
   $('form', m.el).onsubmit = async e => {
     e.preventDefault();
     const data = read(); if (!data) return;
+    if (t.groups?.length) data.groups = t.groups // drop people who left the trip, and groups left empty
+      .map(g => ({ name: g.name || '', members: (g.members || []).filter(p => data.participants.includes(p)) })).filter(g => g.members.length);
     const btn = $('button.primary', m.el);
     if (data.defaultCurrency !== t.defaultCurrency && st.expenses.length) {
       btn.disabled = true; btn.textContent = 'טוען שער…';
@@ -866,13 +970,15 @@ function printReport(st) {
   const s = L.summarize(t, st.expenses, todayIso());
   const cats = L.byCategory(st.expenses);
   const bal = L.balances(t.participants, st.expenses);
-  const tr = L.settleTransfers(bal);
+  const groups = L.cleanGroups(t.groups, t.participants);
+  const tr = L.settleTransfers(L.groupBalances(bal, groups));
   const rows = L.sortTransactions(st.expenses).reverse();
   const n = v => `<td class="n">${esc(v)}</td>`;
   $('#print').innerHTML = `
     <h1>${esc(t.name)}</h1>
     <div>📍 ${esc(t.location)} · ${esc(dateRange(t.startDate, t.endDate))} · מטבע: ${esc(t.defaultCurrency)}</div>
     <div>משתתפים: ${t.participants.map(esc).join(', ')}</div>
+    ${groups.length ? `<div>קבוצות: ${groups.map(g => `${esc(g.name)} (${g.members.map(esc).join(', ')})`).join(' · ')}</div>` : ''}
     <h2>סיכום</h2>
     <div class="kpis">
       <div>סה"כ הוצאות<b class="n">${esc(f(s.totalExpenses))}</b></div><div>הכנסות / החזרים<b class="n">${esc(f(s.totalIncome))}</b></div>

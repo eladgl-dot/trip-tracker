@@ -1,55 +1,40 @@
-// Small touch-friendly SVG charts: a donut with a tappable legend, and day bars.
+// Small touch-friendly charts: a compact category breakdown, and day bars.
 import { esc } from './ui.js';
 
 export const PALETTE = ['#7DD3FC', '#C4B5FD', '#FDA4AF', '#6EE7B7', '#FCD34D', '#A5B4FC', '#F9A8D4', '#5EEAD4', '#FDBA74', '#BEF264'];
 
-// items: [{name, value, count}], fmt: number -> string
-export function donut(host, items, { title, fmt, label = x => x }) {
+// Compact breakdown: one stacked bar + a row per item (top `top`, the rest behind "עוד").
+// items: [{name, value, count}] sorted big→small, fmt: number -> string
+export function breakdown(host, items, { fmt, label = x => x, top = 5 }) {
   const total = items.reduce((a, d) => a + d.value, 0);
   if (!items.length || total <= 0) {
     host.innerHTML = `<div class="empty-chart">אין עדיין נתונים להצגה</div>`;
     return;
   }
-  // Fold a long tail into "אחר" so the legend stays readable.
-  let list = items;
-  if (items.length > 8) {
-    const rest = items.slice(7);
-    list = [...items.slice(0, 7), { name: 'אחר', value: rest.reduce((a, d) => a + d.value, 0), count: rest.reduce((a, d) => a + d.count, 0), other: true }];
-  }
-  let acc = 0;
-  const slices = list.map((d, i) => {
-    const p = d.value / total * 100;
-    const gap = list.length > 1 ? 0.6 : 0;
-    const s = `<circle class="slice" data-i="${i}" cx="21" cy="21" r="15.915" stroke="${PALETTE[i % PALETTE.length]}"
-      stroke-dasharray="${Math.max(p - gap, 0.01)} ${100 - p + gap}" stroke-dashoffset="${-acc}"><title>${esc(label(d.name))}</title></circle>`;
-    acc += p; return s;
-  }).join('');
+  const max = items[0].value;
+  const pct = v => Math.round(v / total * 100);
+  const color = i => PALETTE[i % PALETTE.length];
+  const hidden = items.length > top + 1 ? items.slice(top) : []; // never hide just one row
+  const restSum = hidden.reduce((a, d) => a + d.value, 0);
   host.innerHTML = `
-    <div class="donut-wrap">
-      <div class="donut"><svg viewBox="0 0 42 42" role="img" aria-label="${esc(title)}">
-        <circle cx="21" cy="21" r="15.915" fill="none" stroke="var(--track)" stroke-width="6.5"/>${slices}</svg>
-        <div class="donut-center"></div></div>
-      <ul class="legend">${list.map((d, i) => `<li><button type="button" data-i="${i}"><i style="background:${PALETTE[i % PALETTE.length]}"></i>
-        <span class="lg-name">${esc(label(d.name))}</span><span class="lg-pct num">${Math.round(d.value / total * 100)}%</span></button></li>`).join('')}</ul>
-    </div>
-    <p class="hint">👆 לחיצה על פרוסה או שורה מציגה סכום, אחוז ומספר תנועות</p>`;
-  const box = host.querySelector('.donut'), center = host.querySelector('.donut-center');
-  let current = -1;
-  const show = i => {
-    current = i;
-    box.classList.toggle('sel', i >= 0);
-    host.querySelectorAll('.slice').forEach(c => c.classList.toggle('on', +c.dataset.i === i));
-    host.querySelectorAll('.legend button').forEach(b => b.classList.toggle('on', +b.dataset.i === i));
-    if (i < 0) center.innerHTML = `<span>${esc(title)}</span><b class="money">${fmt(total)}</b>`;
-    else {
-      const d = list[i];
-      center.innerHTML = `<span>${esc(label(d.name))}</span><b class="money">${fmt(d.value)}</b><span class="num">${Math.round(d.value / total * 100)}% · ${d.count} תנועות</span>`;
-    }
-  };
-  const toggle = i => show(current === i ? -1 : i);
-  host.querySelectorAll('.slice').forEach(c => c.addEventListener('click', () => toggle(+c.dataset.i)));
-  host.querySelectorAll('.legend button').forEach(b => b.addEventListener('click', () => toggle(+b.dataset.i)));
-  show(-1);
+    <div class="bd-stack" aria-hidden="true">${items.map((d, i) => `<i style="flex:${d.value};background:${color(i)}"></i>`).join('')}</div>
+    <div class="bd-rows">${items.map((d, i) => `<button type="button" class="bd-row${i >= items.length - hidden.length && hidden.length ? ' more-row' : ''}" data-i="${i}">
+      <span class="bd-top"><span class="bd-name">${esc(label(d.name))}</span><bdi class="bd-amt money">${esc(fmt(d.value))}</bdi><span class="bd-pct num">${pct(d.value)}%</span></span>
+      <span class="bd-track"><i style="width:${Math.max(d.value / max * 100, 1)}%;background:${color(i)}"></i></span>
+      <span class="bd-info num" hidden>${d.count} תנועות · ${pct(d.value)}% מהסה"כ</span></button>`).join('')}</div>
+    ${hidden.length ? `<button type="button" class="bd-more" aria-expanded="false">עוד ${hidden.length} (<span class="num">${pct(restSum)}%</span>) ▾</button>` : ''}`;
+  host.querySelectorAll('.bd-row').forEach(b => b.addEventListener('click', () => {
+    const on = !b.classList.contains('on');
+    host.querySelectorAll('.bd-row').forEach(x => { x.classList.remove('on'); x.querySelector('.bd-info').hidden = true; });
+    b.classList.toggle('on', on); b.querySelector('.bd-info').hidden = !on;
+  }));
+  const more = host.querySelector('.bd-more');
+  if (more) more.addEventListener('click', () => {
+    const open = more.getAttribute('aria-expanded') !== 'true';
+    host.classList.toggle('bd-open', open);
+    more.setAttribute('aria-expanded', open);
+    more.innerHTML = open ? 'פחות ▴' : `עוד ${hidden.length} (<span class="num">${pct(restSum)}%</span>) ▾`;
+  });
 }
 
 // days: [{name: 'YYYY-MM-DD', value, count}]
