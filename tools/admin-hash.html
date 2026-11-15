@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin code hash</title>
+<style>body{font-family:system-ui,sans-serif;max-width:560px;margin:40px auto;padding:0 16px;background:#fff;color:#222}
+input{font-size:20px;padding:8px;width:10ch;direction:ltr}code{display:block;direction:ltr;word-break:break-all;background:#f3f3f3;padding:10px;margin-top:12px}</style></head>
+<body><h1>קוד מנהל חדש</h1><p>הקלידו 6 ספרות, והעתיקו את התוצאה ל-<b>ADMIN_HASH</b> בקובץ app/config.js</p>
+<input id="c" inputmode="numeric" maxlength="6" autofocus><code id="out">—</code>
+<script>
+c.oninput = async () => {
+  c.value = c.value.replace(/\D/g, '');
+  if (c.value.length !== 6) { out.textContent = '—'; return; }
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('triptracker:admin:' + c.value));
+  out.textContent = [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+};
+</script></body></html>
