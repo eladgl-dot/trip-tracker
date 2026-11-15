@@ -24,6 +24,25 @@ try {
   ok('demo banner', await page.locator('.demo-bar').isVisible());
   await noHScroll('home'); await shot('01-home');
 
+  ok('version shown on home', /גרסה\s*\d+\.\d+/.test(await page.locator('.version').textContent()), (await page.locator('.version').textContent()).trim());
+
+  // install banner: shown only when the browser offers install (simulated Android offer)
+  ok('no install banner without an offer', await page.locator('.install').count() === 0);
+  const offer = () => page.evaluate(() => { const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = () => { window.prompted = true; }; e.userChoice = Promise.resolve({ outcome: 'dismissed' }); dispatchEvent(e); });
+  await offer(); await page.waitForTimeout(100);
+  ok('install banner appears on offer', await page.locator('.install').isVisible());
+  await noHScroll('install banner'); await shot('01b-install');
+  await page.click('#installGo'); await page.waitForTimeout(200);
+  ok('"התקנה" opens the browser install window', await page.evaluate(() => window.prompted === true));
+  ok('declined install hides banner', await page.locator('.install').count() === 0);
+  await page.evaluate(() => localStorage.removeItem('tt-install-hide'));
+  await offer(); await page.waitForTimeout(100);
+  await page.click('#installX'); await page.waitForTimeout(100);
+  const snooze = await page.evaluate(() => (+localStorage['tt-install-hide'] - Date.now()) / 86400000);
+  ok('✕ hides banner for 7 days', await page.locator('.install').count() === 0 && snooze > 6.9 && snooze <= 7, snooze.toFixed(2));
+  await offer(); await page.waitForTimeout(100);
+  ok('stays hidden while snoozed', await page.locator('.install').count() === 0);
+
   // PIN
   await page.locator('.trip-card').click();
   await page.waitForSelector('input.code');
@@ -68,9 +87,17 @@ try {
   const rateTxt = await page.locator('#x-rate').textContent();
   ok('live USD→EUR rate shown', /1 USD = [\d.]+ EUR/.test(rateTxt), rateTxt.trim().slice(0, 80));
   await shot('04-add');
-  await page.fill('#x-cat', 'רכבל הרים');
-  ok('combobox offers new category', (await page.locator('#x-cat-list').textContent()).includes('קטגוריה חדשה'));
-  await page.keyboard.press('Enter');
+  ok('category is a dropdown, nothing chosen yet', await page.locator('select#x-cat').count() === 1 && await page.inputValue('#x-cat') === '');
+  ok('first dropdown row adds a new category', (await page.locator('#x-cat option').nth(1).textContent()).includes('להוסיף קטגוריה חדשה'));
+  ok('new-category field hidden at first', !(await page.locator('#x-newcat').isVisible()));
+  await page.selectOption('#x-cat', { index: 1 });
+  ok('choosing "add new" opens text field + button', await page.locator('#x-newcat-in').isVisible() && await page.locator('#x-newcat-add').isVisible());
+  await page.click('#x-save'); await page.waitForTimeout(200);
+  ok('save with empty new-category box shows category error', await page.locator('.sheet [data-f=category].invalid').count() === 1);
+  await page.fill('#x-newcat-in', 'רכבל הרים'); await page.keyboard.press('Enter');
+  ok('Enter adds it (does not save the form)', await page.locator('.sheet').count() === 1 && !(await page.locator('#x-newcat').isVisible()));
+  ok('new category is selected in the dropdown', await page.inputValue('#x-cat') === 'רכבל הרים');
+  await shot('04b-category');
   await page.fill('#x-det', 'רכבל לפסגה');
   await page.fill('#x-com', 'בדיקה');
   await page.click('#x-save');
@@ -92,9 +119,11 @@ try {
   await page.fill('#x-amt', '60'); await page.click('#x-save'); await page.waitForTimeout(400);
   ok('edit saved', (await page.locator('#txList .tx', { hasText: 'רכבל לפסגה' }).textContent()).includes('60.00'));
 
-  // income via top button
-  await page.click('[data-add=income]'); await page.waitForSelector('#x-amt');
-  ok('income button preselects income', await page.locator('[data-t=income][aria-pressed=true]').count() === 1);
+  // the two big add buttons are gone; income is chosen inside the sheet
+  ok('top add buttons removed', await page.locator('#hero [data-add], #hero .add-top').count() === 0);
+  await page.click('#fab'); await page.waitForSelector('#x-amt');
+  await page.click('[data-t=income]');
+  ok('income chosen in the sheet', await page.locator('[data-t=income][aria-pressed=true]').count() === 1);
   await page.click('.sheet [data-x]'); await page.waitForTimeout(250);
 
   // delete
@@ -159,7 +188,7 @@ try {
   await page.setInputFiles('#x-gal', [{ name: 'c.png', mimeType: 'image/png', buffer: icon }, { name: 'd.png', mimeType: 'image/png', buffer: icon }]);
   await page.waitForFunction(() => document.querySelectorAll('#x-photos .thumb img').length === 3, null, { timeout: 8000 }).catch(() => {});
   ok('max 3 photos, add buttons hidden', await page.locator('#x-photos .thumb img').count() === 3 && await page.locator('[data-gal]').count() === 0);
-  await page.fill('#x-amt', '12'); await page.fill('#x-cat', 'מסעדות ובתי קפה'); await page.keyboard.press('Escape');
+  await page.fill('#x-amt', '12'); await page.selectOption('#x-cat', 'מסעדות ובתי קפה');
   await page.fill('#x-det', 'קפה ברומא'); await shot('11-geo-photos');
   await page.click('#x-save'); await page.waitForTimeout(500);
   const row = page.locator('#txList .tx', { hasText: 'קפה ברומא' });

@@ -77,6 +77,31 @@ function route() {
   homePage();
 }
 
+// ---------------------------------------------------------------- install banner (Android / desktop Chrome, Edge)
+// (constants live inside: route() runs before this part of the module is reached)
+addEventListener('appinstalled', () => { window.ttInstall = null; drawInstall(); });
+function drawInstall() {
+  const INSTALL_HIDE = 'tt-install-hide', INSTALL_SNOOZE_MS = 7 * 86400000; // owner: after ✕ it comes back in 7 days
+  const host = $('#install'); if (!host) return;
+  const hidden = Number(ls.get(INSTALL_HIDE)) > Date.now();
+  if (!window.ttInstall || hidden) { host.innerHTML = ''; return; }
+  host.innerHTML = `<div class="install" role="region" aria-label="התקנה">
+      <div class="ic" aria-hidden="true">🧳</div>
+      <div class="txt"><b>להתקין כאפליקציה?</b><span class="muted">פותחים ממסך הבית, עובד גם בלי אינטרנט</span></div>
+      <button class="btn primary sm" id="installGo">התקנה</button>
+      <button class="x" id="installX" title="סגירה" aria-label="סגירה">✕</button></div>`;
+  const snooze = () => ls.set(INSTALL_HIDE, String(Date.now() + INSTALL_SNOOZE_MS));
+  $('#installGo').onclick = async () => {
+    const e = window.ttInstall; if (!e) return;
+    window.ttInstall = null; // the offer can be used only once
+    e.prompt();
+    const { outcome } = await e.userChoice.catch(() => ({}));
+    if (outcome !== 'accepted') snooze();
+    drawInstall();
+  };
+  $('#installX').onclick = () => { snooze(); drawInstall(); };
+}
+
 // ---------------------------------------------------------------- home
 function homePage() {
   view.innerHTML = `
@@ -85,10 +110,14 @@ function homePage() {
       <button class="icon-btn" id="adminBtn" title="פאנל ניהול" aria-label="פאנל ניהול">⚙️</button>
     </header>
     <div class="wrap">
+      <div id="install"></div>
       <a class="btn primary block" href="#/new">+ טיול חדש</a>
       <div id="trips"><div class="skeleton"></div></div>
+      <p class="version muted small center">גרסה <span class="num" dir="ltr">${esc(window.TT_VERSION || '?')}</span></p>
     </div>`;
   $('#adminBtn').onclick = askAdmin;
+  drawInstall();
+  addEventListener('tt-install', drawInstall); cleanups.push(() => removeEventListener('tt-install', drawInstall));
   const host = $('#trips');
   const closeMenus = e => { if (!e.target.closest('.kebab, .menu')) $$('.menu', host).forEach(m => m.remove()); };
   document.addEventListener('click', closeMenus);
@@ -315,12 +344,7 @@ async function tripPage(id) {
       <h1>${esc(t.name)}</h1>
       <div class="muted">📍 ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
       <div class="chips">${t.participants.map(p => `<span class="chip">${esc(p)}</span>`).join('')}
-        <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span></div>
-      <div class="add-top">
-        <button class="btn danger" data-add="expense">− הוספת הוצאה</button>
-        <button class="btn mint" data-add="income">+ הכנסה / החזר</button>
-      </div>`;
-    $$('[data-add]', $('#hero')).forEach(b => b.onclick = () => expenseSheet(st, null, b.dataset.add));
+        <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span></div>`;
   };
 
   const drawStats = () => {
@@ -491,9 +515,13 @@ function expenseSheet(st, existing, type = 'expense') {
         <div><label class="lbl" for="x-cur">מטבע *</label><select id="x-cur">${L.CURRENCIES.map(c => `<option ${c.code === e.currency ? 'selected' : ''}>${c.code}</option>`).join('')}</select></div>
       </div>
       <div class="rate-box hidden" id="x-rate" aria-live="polite"></div>
-      <div class="field combo" data-f="category"><label class="lbl" for="x-cat">קטגוריה *</label>
-        <input id="x-cat" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="x-cat-list" placeholder="בחרו או הקלידו קטגוריה חדשה" value="${esc(e.category)}">
-        <ul class="combo-list hidden" id="x-cat-list" role="listbox"></ul><p class="err"></p></div>
+      <div class="field" data-f="category"><label class="lbl" for="x-cat">קטגוריה *</label>
+        <select id="x-cat"></select>
+        <div class="newcat hidden" id="x-newcat">
+          <input id="x-newcat-in" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="שם הקטגוריה החדשה" aria-label="שם הקטגוריה החדשה">
+          <button type="button" class="btn primary sm" id="x-newcat-add">להוסיף</button>
+          <button type="button" class="x" id="x-newcat-x" title="ביטול" aria-label="ביטול">✕</button>
+        </div><p class="err"></p></div>
       <div class="row2 field">
         <div data-f="date"><label class="lbl" for="x-date">תאריך *</label><input id="x-date" type="date" value="${esc(e.date)}"><p class="err"></p></div>
         <div data-f="paidBy"><label class="lbl" for="x-who" id="x-who-lbl">מי שילם *</label><select id="x-who">${t.participants.map(p => `<option ${p === e.paidBy ? 'selected' : ''}>${esc(p)}</option>`).join('')}
@@ -512,7 +540,7 @@ function expenseSheet(st, existing, type = 'expense') {
     </form>`, { sheet: true, label: existing ? 'עריכת תנועה' : 'הוספת תנועה' });
   const el = m.el;
   let kind = e.type;
-  const amt = $('#x-amt', el), cur = $('#x-cur', el), box = $('#x-rate', el), cat = $('#x-cat', el), list = $('#x-cat-list', el);
+  const amt = $('#x-amt', el), cur = $('#x-cur', el), box = $('#x-rate', el), cat = $('#x-cat', el);
 
   const drawType = () => {
     $$('[data-t]', el).forEach(b => b.setAttribute('aria-pressed', b.dataset.t === kind));
@@ -566,33 +594,39 @@ function expenseSheet(st, existing, type = 'expense') {
   amt.oninput = () => { if (!box.querySelector('input')) drawRate(); };
   if (!existing && cur.value !== t.defaultCurrency) loadRate(); else drawRate();
 
-  // ---- category combobox
-  let hl = -1, options = [];
-  const drawList = () => {
-    const q = cat.value.trim();
-    const all = categories.includes(L.UNCATEGORIZED) ? categories : categories;
-    const matches = all.filter(c => !q || c.includes(q));
-    options = matches.map(c => ({ value: c, html: `${L.categoryEmoji(c)} ${esc(c)}` }));
-    if (q && !all.includes(q)) options.unshift({ value: q, html: `🏷️ ${esc(q)} <span class="new">· קטגוריה חדשה +</span>` });
-    hl = Math.min(hl, options.length - 1);
-    list.innerHTML = options.map((o, i) => `<li role="option" data-i="${i}" class="${i === hl ? 'hl' : ''}">${o.html}</li>`).join('');
-    list.classList.toggle('hidden', !options.length);
-    cat.setAttribute('aria-expanded', options.length > 0);
-    $$('li', list).forEach(li => li.onmousedown = ev => { ev.preventDefault(); pick(+li.dataset.i); });
+  // ---- category: a plain dropdown (the phone's own picker). First row adds a new category.
+  const NEW_CAT = '__new_category__';
+  const newBox = $('#x-newcat', el), newIn = $('#x-newcat-in', el);
+  const extra = []; // categories added in this sheet; saved to the shared list on Save
+  let chosen = e.category || '';
+  const drawCats = () => {
+    const all = [...new Set([...categories, ...extra, ...(chosen ? [chosen] : [])])];
+    cat.innerHTML = `<option value="" disabled hidden>בחרו קטגוריה</option>
+      <option value="${NEW_CAT}">➕ להוסיף קטגוריה חדשה</option>`
+      + all.map(c => `<option value="${esc(c)}">${L.categoryEmoji(c)} ${esc(c)}</option>`).join('');
+    cat.value = newBox.classList.contains('hidden') ? chosen : NEW_CAT;
   };
-  const pick = i => { cat.value = options[i].value; closeList(); $('#x-det', el).focus(); };
-  const closeList = () => { list.classList.add('hidden'); cat.setAttribute('aria-expanded', false); hl = -1; };
-  cat.onfocus = () => { drawList(); };
-  cat.oninput = () => { hl = 0; drawList(); };
-  cat.onblur = () => setTimeout(closeList, 120);
-  cat.onkeydown = ev => {
-    if (list.classList.contains('hidden')) return;
-    if (ev.key === 'ArrowDown') { hl = Math.min(hl + 1, options.length - 1); drawList(); ev.preventDefault(); }
-    else if (ev.key === 'ArrowUp') { hl = Math.max(hl - 1, 0); drawList(); ev.preventDefault(); }
-    else if (ev.key === 'Enter' && hl >= 0) { ev.preventDefault(); pick(hl); }
-    else if (ev.key === 'Escape') { ev.stopPropagation(); closeList(); }
+  const closeNew = () => { newBox.classList.add('hidden'); newIn.value = ''; drawCats(); };
+  const addNew = () => {
+    const name = newIn.value.trim();
+    if (!name) return newIn.focus();
+    const same = [...categories, ...extra].find(c => c === name);
+    if (!same) extra.push(name);
+    chosen = name; closeNew();
+    $('[data-f=category]', el).classList.remove('invalid'); $('[data-f=category] .err', el).textContent = '';
   };
-  const onCats = () => { if (!list.classList.contains('hidden')) drawList(); };
+  cat.onchange = () => {
+    if (cat.value === NEW_CAT) { newBox.classList.remove('hidden'); newIn.focus(); return; }
+    chosen = cat.value; newBox.classList.add('hidden'); newIn.value = '';
+  };
+  $('#x-newcat-add', el).onclick = addNew;
+  $('#x-newcat-x', el).onclick = () => { closeNew(); cat.focus(); };
+  newIn.onkeydown = ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); addNew(); }
+    else if (ev.key === 'Escape') { ev.stopPropagation(); closeNew(); }
+  };
+  drawCats();
+  const onCats = () => drawCats();
   catListeners.add(onCats);
   m.result.then(() => catListeners.delete(onCats));
 
@@ -679,7 +713,8 @@ function expenseSheet(st, existing, type = 'expense') {
     const x = {
       type: kind, amount: amt2, currency: cur.value,
       exchangeRateToTripDefault: rate, convertedAmount: amt2 > 0 && rate > 0 ? L.convert(amt2, rate) : 0,
-      category: cat.value.trim(), date: $('#x-date', el).value, details: $('#x-det', el).value.trim(),
+      category: newBox.classList.contains('hidden') ? chosen.trim() : newIn.value.trim(), // open but empty -> "choose a category" error
+      date: $('#x-date', el).value, details: $('#x-det', el).value.trim(),
       comment: $('#x-com', el).value.trim(), paidBy: $('#x-who', el).value,
       location: loc
     };

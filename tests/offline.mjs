@@ -31,7 +31,7 @@ async function addExpense(amount, cur, details) {
   await page.selectOption('#x-cur', cur);
   await page.waitForTimeout(500);
   const rate = (await page.locator('#x-rate').textContent()) || '';
-  await page.fill('#x-cat', 'מזון'); await page.keyboard.press('Enter');
+  await page.selectOption('#x-cat', { index: 2 }); // first real category
   await page.fill('#x-det', details);
   await page.click('#x-save'); await page.waitForTimeout(600);
   return rate;
