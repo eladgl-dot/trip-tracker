@@ -323,7 +323,7 @@ async function tripPage(id) {
     if (!here()) return;
     if (!ok) return go('#/');
   }
-  const st = { trip: null, expenses: [], tab: 'list', search: '', chart: 'cat', who: '', built: false };
+  const st = { trip: null, expenses: [], tab: 'list', search: '', chart: 'cat', focus: null, who: '', built: false };
   const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
 
   const build = () => {
@@ -348,7 +348,6 @@ async function tripPage(id) {
         <div class="filter" id="who" role="group" aria-label="סינון לפי משתתף"></div>
         <div class="wrap" style="margin-top:var(--s3)" id="settle"></div>
       </div>
-      <div class="share-row"><button class="wa" id="share">${WA_ICON}לשתף את הוצאות הטיול</button><button class="pdf-btn" id="pdf">📄 ייצוא PDF</button></div>
       <button class="fab" id="fab"><span aria-hidden="true">+</span>להוסיף הוצאה</button>`;
     // Material-style: when the big banner scrolls away, a slim bar stays at the top.
     const io = new IntersectionObserver(([en]) => {
@@ -360,15 +359,16 @@ async function tripPage(id) {
       if (e.target.closest('[data-edit-trip]')) editTripSheet(st);
       else if (e.target.closest('[data-people]')) peoplePopup(st);
       else if (e.target.closest('[data-groups]')) groupsSheet(st);
+      else if (e.target.closest('#share')) shareTrip(st.trip);
+      else if (e.target.closest('#pdf')) printReport(st);
+      else if (e.target.closest('[data-unfocus]')) setFocus(null);
       else if (e.target.closest('[data-hide-banner]')) { try { localStorage.setItem('tt-grp-banner-' + st.trip.id, '0'); } catch {} drawSettle(); }
     };
     view.addEventListener('click', onClick); cleanups.push(() => view.removeEventListener('click', onClick));
-    $('#share').onclick = () => shareTrip(st.trip);
     $('#fab').onclick = () => expenseSheet(st, null, 'expense');
     $$('[data-tab]').forEach(b => b.onclick = () => { st.tab = b.dataset.tab; drawTabs(); });
-    $$('[data-ch]').forEach(b => b.onclick = () => { st.chart = b.dataset.ch; drawChart(); });
+    $$('[data-ch]').forEach(b => b.onclick = () => { if (st.chart === b.dataset.ch) return; st.chart = b.dataset.ch; st.focus = null; drawChart(); drawList(); });
     $('#search').oninput = e => { st.search = e.target.value; drawList(); };
-    $('#pdf').onclick = () => printReport(st);
     st.built = true;
   };
 
@@ -388,8 +388,10 @@ async function tripPage(id) {
     hero.style.background = bg;
     hero.innerHTML = `<div class="tb-row">${btns(`<h1>${esc(t.name)}</h1>`)}</div>
       <div class="tb-meta">📍 ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
-      <div class="chips"><button type="button" class="chip ppl" data-people>👥 משתתפים (${t.participants.length})</button>
-        <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span></div>`;
+      <div class="chips tb-chips"><button type="button" class="chip ppl" data-people title="משתתפים" aria-label="משתתפים (${t.participants.length})">👥 <span class="num">${t.participants.length}</span></button>
+        <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
+        <span class="tb-share"><button type="button" class="chip wa-chip" id="share" title="שיתוף בוואטסאפ">${WA_ICON}שיתוף</button>
+          <button type="button" class="chip pdf-chip" id="pdf" title="ייצוא PDF">📄 PDF</button></span></div>`;
     const s = L.summarize(t, st.expenses, todayIso());
     const mini = $('#miniBar');
     mini.style.background = bg;
@@ -410,26 +412,37 @@ async function tripPage(id) {
   const drawChart = () => {
     $$('[data-ch]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ch === st.chart));
     const host = $('#chart');
-    if (st.chart === 'cat') breakdown(host, L.byCategory(st.expenses), { fmt, label: n => `${L.categoryEmoji(n)} ${n}` });
-    else bars(host, L.byDay(st.expenses), { fmt, total: L.summarize(st.trip, st.expenses).totalExpenses });
+    const scrollX = host.querySelector('.bars-scroll')?.scrollLeft;
+    const items = st.chart === 'cat' ? L.byCategory(st.expenses) : L.byDay(st.expenses);
+    if (st.focus && !items.some(d => d.name === st.focus.name)) st.focus = null; // its last expense was deleted/moved
+    const selected = st.focus?.name ?? null;
+    const onSelect = name => { st.focus = name ? { kind: st.chart, name } : null; drawList(); };
+    if (st.chart === 'cat') breakdown(host, items, { fmt, label: n => `${L.categoryEmoji(n)} ${n}`, selected, onSelect });
+    else bars(host, items, { fmt, total: L.summarize(st.trip, st.expenses).totalExpenses, selected, onSelect });
+    const sc = host.querySelector('.bars-scroll');
+    if (sc && scrollX != null) sc.scrollLeft = scrollX;
   };
+  const setFocus = f => { st.focus = f; drawChart(); drawList(); };
 
   const drawList = () => {
     const host = $('#txList');
+    const focusPill = n => {
+      const f = st.focus;
+      if (!f) return '';
+      const what = f.kind === 'cat' ? `${L.categoryEmoji(f.name)} <bdi>${esc(f.name)}</bdi>`
+        : `📅 <bdi>${esc(formatDate(f.name, { weekday: 'short', day: '2-digit', month: '2-digit' }))}</bdi>`;
+      return `<div class="focus-pill"><span>${what} · <span class="num">${n}</span> ראשונות</span>
+          <button type="button" class="x" data-unfocus title="ביטול" aria-label="ביטול הסידור">✕</button></div>`;
+    };
     const list = L.sortTransactions(st.expenses.filter(e => L.matchesSearch(e, st.search)));
     if (!st.expenses.length) {
       host.innerHTML = `<div class="empty"><div class="big">🧾</div><p>עדיין אין תנועות.<br>לחצו על + כדי להוסיף את ההוצאה הראשונה.</p></div>`; return;
     }
-    if (!list.length) { host.innerHTML = `<div class="empty">לא נמצאו תנועות עבור "${esc(st.search)}"</div>`; return; }
-    let lastDay = null, html = '';
-    for (const e of list) {
-      if (e.date !== lastDay) {
-        lastDay = e.date;
-        html += `<div class="day-head">${esc(formatDate(e.date, { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }))}</div>`;
-      }
+    if (!list.length) { host.innerHTML = focusPill(0) + `<div class="empty">לא נמצאו תנועות עבור "${esc(st.search)}"</div>`; return; }
+    const card = (e, dim) => {
       const inc = e.type === 'income';
       const other = e.currency !== st.trip.defaultCurrency;
-      html += `<div class="card tx ${inc ? 'income' : ''}">
+      return `<div class="card tx ${inc ? 'income' : ''}${dim ? ' dim' : ''}">
         <div class="ic" aria-hidden="true">${inc ? '↩️' : L.categoryEmoji(e.category)}</div>
         <div class="mid">
           <div class="t">${esc(e.details)}</div>
@@ -443,6 +456,26 @@ async function tripPage(id) {
         <div class="amt ${inc ? 'pos' : 'neg'}"><span class="money">${inc ? '+' : ''}${esc(L.formatMoney(e.amount, e.currency))}</span>
           ${other ? `<small class="money">≈ ${esc(fmt(e.convertedAmount))}</small>` : ''}</div>
       </div>`;
+    };
+    const days = (part, dim) => {
+      let lastDay = null, out = '';
+      for (const e of part) {
+        if (e.date !== lastDay) {
+          lastDay = e.date;
+          out += `<div class="day-head${dim ? ' dim' : ''}">${esc(formatDate(e.date, { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }))}</div>`;
+        }
+        out += card(e, dim);
+      }
+      return out;
+    };
+    const { first, rest } = L.focusSplit(list, st.focus);
+    let html;
+    if (!st.focus) html = days(rest, false);
+    else {
+      const f = st.focus;
+      html = focusPill(first.length)
+        + days(first, false)
+        + (rest.length ? `<div class="focus-sep">${f.kind === 'cat' ? 'לא בקטגוריה הנבחרת' : 'לא ביום הנבחר'} · <span class="num">${rest.length}</span></div>` + days(rest, true) : '');
     }
     host.innerHTML = html;
     $$('[data-edit]', host).forEach(b => b.onclick = () => expenseSheet(st, st.expenses.find(x => x.id === b.dataset.edit)));

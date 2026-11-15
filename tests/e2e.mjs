@@ -59,8 +59,9 @@ try {
 
   // WhatsApp share
   await page.evaluate(() => { window.opened = []; window.open = u => { window.opened.push(u); return {}; }; });
-  ok('share button at the bottom', (await page.locator('#share').textContent()).includes('לשתף את הוצאות הטיול'));
-  await page.locator('#share').scrollIntoViewIfNeeded(); await shot('02b-share-button');
+  ok('share button in the banner, labelled שיתוף', await page.locator('#hero #share').count() === 1 && (await page.locator('#share').textContent()).includes('שיתוף'));
+  ok('no share row at the bottom any more', await page.locator('.share-row').count() === 0);
+  await shot('02b-share-button');
   await page.click('#share'); await page.waitForSelector('[data-link]');
   await shot('02c-share-ask');
   await page.click('[data-link]'); await page.waitForTimeout(200);
@@ -79,14 +80,35 @@ try {
   // charts
   ok('breakdown rows (no donut)', await page.locator('#chart .bd-row').count() >= 2 && await page.locator('.donut').count() === 0);
   ok('biggest category first with amount + %', /לינה[\s\S]*%/.test(await page.locator('#chart .bd-row').first().textContent()));
+  ok('no focus pill before a tap', await page.locator('.focus-pill').count() === 0);
+  const catName = (await page.locator('#chart .bd-row').nth(1).locator('.bd-name').textContent()).replace(/^\S+\s/, '').trim();
   await page.locator('#chart .bd-row').nth(1).click();
   const info = await page.locator('#chart .bd-row.on .bd-info').textContent();
   ok('tap row shows count', info.includes('תנועות'), info.trim());
+  ok('tapped category: focus pill above list', (await page.locator('#txList .focus-pill').textContent()).includes(catName), catName);
+  const cats = await page.locator('#txList .tx').evaluateAll(els => els.map(e => ({ cat: e.querySelector('.mid .muted').textContent.split(' · ')[0].trim(), dim: e.classList.contains('dim') })));
+  const nFirst = cats.findIndex(c => c.dim) < 0 ? cats.length : cats.findIndex(c => c.dim);
+  ok('tapped category items come first', nFirst > 0 && cats.slice(0, nFirst).every(c => c.cat === catName), JSON.stringify(cats.slice(0, nFirst + 1)));
+  ok('others after a divider, faded', await page.locator('#txList .focus-sep').count() === 1 && cats.slice(nFirst).every(c => c.dim));
+  ok('nothing lost from the list', cats.length === await page.evaluate(() => document.querySelectorAll('#txList .tx').length) && cats.length >= 8, String(cats.length));
   await noHScroll('breakdown'); await shot('02c-breakdown');
+  // the choice survives a redraw (e.g. live update) and ✕ clears it
+  await page.fill('#search', ' '); await page.fill('#search', '');
+  ok('focus kept after redraw', await page.locator('#txList .focus-pill').count() === 1 && await page.locator('#chart .bd-row.on').count() === 1);
+  await page.fill('#search', 'zzzz-nothing');
+  ok('search with no results keeps the focus pill + ✕', await page.locator('#txList .focus-pill [data-unfocus]').count() === 1);
+  await page.fill('#search', '');
+  await page.click('#txList [data-unfocus]');
+  ok('✕ clears focus (list + chart)', await page.locator('.focus-pill').count() === 0 && await page.locator('#chart .bd-row.on').count() === 0 && await page.locator('#txList .tx.dim').count() === 0);
+  await page.locator('#chart .bd-row').nth(1).click(); await page.locator('#chart .bd-row').nth(1).click();
+  ok('tapping the same row again clears focus', await page.locator('.focus-pill').count() === 0);
   // header: no "טיולון" bar, back/edit inside banner, one participants pill, slim bar on scroll
   ok('no old top bar on trip page', await page.locator('#view .topbar').count() === 0);
   ok('back + edit in banner', await page.locator('#hero a.ib[href="#/"]').count() === 1 && await page.locator('#hero [data-edit-trip]').count() === 1);
-  ok('one participants pill', /משתתפים \(4\)/.test(await page.locator('#hero [data-people]').textContent()) && await page.locator('#hero .chip').count() === 2);
+  ok('participants pill shows 👥 4 (no word)', /👥\s*4/.test(await page.locator('#hero [data-people]').textContent()) && !(await page.locator('#hero [data-people]').textContent()).includes('משתתפים'));
+  ok('banner: 4 pills (people, currency, share, PDF)', await page.locator('#hero .chip').count() === 4);
+  const tops = await page.locator('#hero .tb-chips .chip').evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
+  ok('all 4 pills on one row at 390px', new Set(tops).size === 1, tops.join(','));
   await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(300);
   ok('slim bar hidden at top', !(await page.locator('#miniBar').getAttribute('class')).includes('on'));
   await page.evaluate(() => scrollTo(0, 900)); await page.waitForTimeout(400);
@@ -94,7 +116,8 @@ try {
   ok('slim bar: name + days · net', /ימים/.test(await page.locator('#miniBar').textContent()));
   await page.screenshot({ path: `${OUT}/02d-slim-bar.png` });
   await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(300);
-  ok('PDF next to share', await page.locator('.share-row #pdf').count() === 1 && await page.locator('.toolbar #pdf').count() === 0);
+  ok('PDF next to share in the banner', await page.locator('#hero .tb-share #pdf').count() === 1 && await page.locator('#hero .tb-share #share').count() === 1);
+  ok('slim bar has no share/PDF', await page.locator('#miniBar #share, #miniBar #pdf').count() === 0);
   await page.click('#hero [data-people]'); await page.waitForSelector('.people-list');
   ok('people popup lists all', await page.locator('.people-list li').count() === 4);
   await shot('02e-people'); await page.click('.dialog [data-x]'); await page.waitForTimeout(250);
@@ -102,6 +125,10 @@ try {
   await page.locator('.bar').first().click();
   const tip = await page.locator('.tip').textContent();
   ok('tap bar shows day details', tip.includes('תנועות'), tip.trim());
+  ok('tapped day: focus pill + divider "לא ביום הנבחר"', await page.locator('#txList .focus-pill').count() === 1 && (await page.locator('#txList .focus-sep').textContent()).includes('לא ביום הנבחר'));
+  await page.click('[data-ch=cat]');
+  ok('switching chart clears focus', await page.locator('.focus-pill').count() === 0);
+  await page.click('[data-ch=day]');
   await shot('03-bars');
 
   // search
@@ -217,7 +244,7 @@ try {
   ok('cannot remove participant with transactions', (await toastText()).includes('אי אפשר'));
   await page.fill('#f-person', 'דנה'); await page.click('#f-add');
   await page.click('.sheet button.primary'); await page.waitForTimeout(400);
-  ok('participant added', /משתתפים \(5\)/.test(await page.locator('#hero [data-people]').textContent()));
+  ok('participant added', /👥\s*5/.test(await page.locator('#hero [data-people]').textContent()));
   const heroStyle = await page.locator('#hero').getAttribute('style');
   ok('trip color applied', /D1FAE5|209, 250, 229/i.test(heroStyle), heroStyle);
 

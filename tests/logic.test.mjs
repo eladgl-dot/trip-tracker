@@ -215,3 +215,40 @@ test('groupBalances: names stay unique (group named like a person / two same nam
   assert.equal(new Set(names).size, names.length, names.join('|'));
   assert.ok(names.includes('ה'), 'the person keeps their own name');
 });
+
+// ---------- focus: chosen category/day first in the list ----------
+test('focusSplit: chosen category first, the rest after, both keep their order', () => {
+  const list = [
+    ex('א', 1, { id: 'a', category: 'דלק', date: '2026-10-02' }),
+    ex('א', 2, { id: 'b', category: 'טיסות', date: '2026-10-01' }),
+    ex('א', 3, { id: 'c', category: 'דלק', date: '2026-09-30' }),
+    ex('א', 4, { id: 'd', category: 'שונות', date: '2026-09-29' })
+  ];
+  const r = L.focusSplit(list, { kind: 'cat', name: 'דלק' });
+  assert.deepEqual(r.first.map(e => e.id), ['a', 'c']);
+  assert.deepEqual(r.rest.map(e => e.id), ['b', 'd']);
+});
+
+test('focusSplit: no focus = everything in rest, first empty', () => {
+  const list = [ex('א', 1, { id: 'a' }), ex('א', 2, { id: 'b' })];
+  const r = L.focusSplit(list, null);
+  assert.deepEqual(r.first, []);
+  assert.deepEqual(r.rest.map(e => e.id), ['a', 'b']);
+});
+
+test('focusSplit: by day; income never counts as in focus (charts count expenses only)', () => {
+  const list = [
+    ex('א', 1, { id: 'a', date: '2026-09-28' }),
+    { ...inc('א', 5), id: 'i', date: '2026-09-28', category: 'שונות' },
+    ex('א', 2, { id: 'b', date: '2026-09-29' })
+  ];
+  const r = L.focusSplit(list, { kind: 'day', name: '2026-09-28' });
+  assert.deepEqual(r.first.map(e => e.id), ['a']);
+  assert.deepEqual(r.rest.map(e => e.id), ['i', 'b']);
+});
+
+test('focusSplit: missing category matches "ללא קטגוריה" like the chart', () => {
+  const list = [ex('א', 1, { id: 'a', category: '' }), ex('א', 2, { id: 'b' })];
+  const r = L.focusSplit(list, { kind: 'cat', name: L.UNCATEGORIZED });
+  assert.deepEqual(r.first.map(e => e.id), ['a']);
+});

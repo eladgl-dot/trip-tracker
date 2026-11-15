@@ -209,6 +209,16 @@ export function sortTransactions(list) {
   return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAtMs || 0) - (a.createdAtMs || 0));
 }
 
+// The item tapped in the chart ({kind: 'cat'|'day', name}) goes first in the list; order is kept in both parts.
+// Income is never "in focus" because the charts count expenses only.
+export function focusSplit(list, focus) {
+  if (!focus) return { first: [], rest: [...list] };
+  const key = focus.kind === 'day' ? e => e.date : e => e.category || UNCATEGORIZED;
+  const first = [], rest = [];
+  for (const e of list) (e.type !== 'income' && key(e) === focus.name ? first : rest).push(e);
+  return { first, rest };
+}
+
 // ---------- validation ----------
 export const isPin4 = s => /^\d{4}$/.test(s);
 export const isCode6 = s => /^\d{6}$/.test(s);
