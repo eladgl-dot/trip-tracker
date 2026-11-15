@@ -123,7 +123,7 @@ test('address from a Nominatim reply', () => {
   assert.equal(L.formatAddress({ name: 'Gelateria', address: { road: 'Via Roma', house_number: '5', town: 'Sirmione', country: 'איטליה' } }),
     'Gelateria, Via Roma 5, Sirmione, איטליה');
   assert.equal(L.formatAddress({ address: { road: 'Via Roma', city: 'Milano', country: 'איטליה' } }), 'Via Roma, Milano, איטליה');
-  assert.equal(L.formatAddress({ name: '1_33051', address: { city: 'מילנו', country: 'איטליה' } }), 'מילנו, איטליה');
+  assert.equal(L.formatAddress({ name: '1_33051', address: { road: '1_33051', neighbourhood: 'Cinque Vie', city: 'מילנו', country: 'איטליה' } }), 'Cinque Vie, מילנו, איטליה');
   assert.equal(L.formatAddress({ display_name: 'X' }), 'X');
   assert.equal(L.formatAddress(null), '');
   assert.equal(L.mapsUrl({ lat: 45.5, lng: 10.6 }), 'https://www.google.com/maps/search/?api=1&query=45.5,10.6');
@@ -144,4 +144,8 @@ test('photo ids survive an edit even if saved photos never loaded', () => {
   assert.deepEqual(L.nextPhotoIds(['a', 'b', 'c'], [], ['d']), ['a', 'b', 'c', 'd']);
   assert.deepEqual(L.nextPhotoIds(['a', 'b'], ['a'], []), ['b']);
   assert.deepEqual(L.nextPhotoIds(undefined, [], ['x']), ['x']);
+});
+
+test('street names with numbers are kept', () => {
+  assert.equal(L.formatAddress({ address: { road: 'Route 101', town: 'Eilat', country: 'ישראל' } }), 'Route 101, Eilat, ישראל');
 });

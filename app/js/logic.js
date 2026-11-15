@@ -218,10 +218,11 @@ export function formatAccuracy(m) {
 export function formatAddress(j) {
   if (!j) return '';
   const a = j.address || {};
-  const street = a.road ? a.road + (a.house_number ? ' ' + a.house_number : '') : '';
+  // OpenStreetMap sometimes has internal codes ("1_33051") instead of names: skip those.
+  const real = s => !!s && /\p{L}{2}/u.test(s) && !s.includes('_');
+  const street = real(a.road) ? a.road + (a.house_number ? ' ' + a.house_number : '') : (real(a.neighbourhood) ? a.neighbourhood : '');
   const town = a.city || a.town || a.village || a.hamlet || a.suburb || a.municipality || a.county || a.state || '';
-  const realName = j.name && j.name !== a.road && /\p{L}{2}/u.test(j.name) && !/[_\d]{3}/.test(j.name); // skip codes like "1_33051"
-  const parts = [realName ? j.name : '', street, town, a.country || ''].filter(Boolean);
+  const parts = [real(j.name) && j.name !== a.road ? j.name : '', street, town, a.country || ''].filter(Boolean);
   return parts.length ? parts.join(', ') : (j.display_name || '');
 }
 export const mapsUrl = loc => `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
