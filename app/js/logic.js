@@ -226,3 +226,8 @@ export function formatAddress(j) {
   return parts.length ? parts.join(', ') : (j.display_name || '');
 }
 export const mapsUrl = loc => `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
+
+// WhatsApp share: the link sits on its own line so it stays clickable inside Hebrew text.
+export const shareMessage = (tripName, link, pin = '') =>
+  `🧳 הוצאות הטיול "${tripName}"\n${link}` + (pin ? `\n🔑 סיסמה: ${pin}` : '');
+export const shareUrl = text => 'https://wa.me/?text=' + encodeURIComponent(text);

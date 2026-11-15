@@ -65,14 +65,14 @@ export function confirmBox(title, text, { ok = 'אישור', danger = false } = 
 }
 
 // A digits-only code prompt (trip PIN / admin code). check(code) -> true | false (async ok).
-export function codePrompt({ title, text, length, check, note = '' }) {
+export function codePrompt({ title, text, length, check, note = '', ok = 'כניסה', okClass = 'primary' }) {
   const m = modal(`<h2 class="center">${esc(title)}</h2><p class="muted center">${esc(text)}</p>
     <form novalidate>
       <input class="code num" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
         maxlength="${length}" aria-label="${esc(text)}" required>
       <p class="err center" aria-live="polite"></p>
       ${note ? `<p class="muted center small">${esc(note)}</p>` : ''}
-      <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button class="btn primary">כניסה</button></div>
+      <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button class="btn ${okClass}">${esc(ok)}</button></div>
     </form>`, { label: title });
   const input = m.el.querySelector('input'), err = m.el.querySelector('.err');
   input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, length); err.textContent = ''; });

@@ -149,3 +149,14 @@ test('photo ids survive an edit even if saved photos never loaded', () => {
 test('street names with numbers are kept', () => {
   assert.equal(L.formatAddress({ address: { road: 'Route 101', town: 'Eilat', country: 'ישראל' } }), 'Route 101, Eilat, ישראל');
 });
+
+test('shareMessage: trip name, link on its own line, password only when given', () => {
+  const link = 'https://x.github.io/trip-tracker/#/trip/abc';
+  assert.equal(L.shareMessage('איטליה', link), `🧳 הוצאות הטיול "איטליה"\n${link}`);
+  assert.equal(L.shareMessage('איטליה', link, '0123'), `🧳 הוצאות הטיול "איטליה"\n${link}\n🔑 סיסמה: 0123`);
+});
+
+test('shareUrl: WhatsApp link with the whole message encoded', () => {
+  const u = L.shareUrl('א b\n&');
+  assert.equal(u, 'https://wa.me/?text=' + encodeURIComponent('א b\n&'));
+});

@@ -14,7 +14,7 @@ page.on('pageerror', e => errors.push('pageerror: ' + e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 const shot = n => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: true });
 const noHScroll = async n => ok(`no horizontal scroll (${n})`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
-const tapRing = async host => { const b = await page.locator(host + ' .donut').boundingBox(); await page.mouse.click(b.x + b.width / 2 + b.width * 0.379, b.y + b.height / 2); };
+const tapRing = async host => { await page.locator(host + ' .donut').evaluate(el => el.scrollIntoView({ block: 'start' })); const b = await page.locator(host + ' .donut').boundingBox(); await page.mouse.click(b.x + b.width / 2 + b.width * 0.379, b.y + b.height / 2); };
 const toastText = async () => (await page.locator('#toast').textContent()).trim();
 
 try {
@@ -56,6 +56,26 @@ try {
   const net = await page.locator('#stats .stat.big .money').textContent();
   ok('net = 1,630.20 (seed data)', net.includes('1,630.20'), net);
   await noHScroll('trip'); await shot('02-trip');
+  ok('+ button says "להוסיף הוצאה"', (await page.locator('#fab').textContent()).includes('להוסיף הוצאה'));
+
+  // WhatsApp share
+  await page.evaluate(() => { window.opened = []; window.open = u => { window.opened.push(u); return {}; }; });
+  ok('share button at the bottom', (await page.locator('#share').textContent()).includes('לשתף את הוצאות הטיול'));
+  await page.locator('#share').scrollIntoViewIfNeeded(); await shot('02b-share-button');
+  await page.click('#share'); await page.waitForSelector('[data-link]');
+  await shot('02c-share-ask');
+  await page.click('[data-link]'); await page.waitForTimeout(200);
+  const msg1 = await page.evaluate(() => decodeURIComponent((window.opened[0] || '').split('text=')[1] || ''));
+  ok('"רק קישור" opens WhatsApp with name + trip link, no password', msg1.includes('#/trip/') && msg1.includes('הוצאות הטיול') && !msg1.includes('סיסמה'), msg1.replace(/\n/g, ' | '));
+  await page.click('#share'); await page.click('[data-pin]'); await page.waitForSelector('input.code');
+  await page.fill('input.code', '9999'); await page.click('.dialog button.wa-go'); await page.waitForTimeout(300);
+  ok('wrong password is not sent', (await page.locator('.dialog .err').textContent()).includes('שגוי') && await page.evaluate(() => window.opened.length) === 1);
+  await page.fill('input.code', '1234'); await shot('02d-share-pin'); await page.click('.dialog button.wa-go'); await page.waitForTimeout(300);
+  const msg2 = await page.evaluate(() => decodeURIComponent((window.opened[1] || '').split('text=')[1] || ''));
+  ok('with password: message has 🔑 סיסמה: 1234', msg2.includes('🔑 סיסמה: 1234') && msg2.includes('#/trip/'));
+  await page.goto(BASE + '?demo#/'); await page.waitForSelector('.trip-card .lock');
+  ok('lock text: "עוד X ימים צריך להזין את הסיסמא שוב"', /עוד \d+ ימים צריך להזין את הסיסמא שוב/.test(await page.locator('.trip-card .lock').textContent()));
+  await page.locator('.trip-card').click(); await page.waitForSelector('#stats .stat');
 
   // charts
   await tapRing('#chart');

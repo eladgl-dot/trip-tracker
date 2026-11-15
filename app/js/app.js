@@ -77,6 +77,30 @@ function route() {
   homePage();
 }
 
+// ---------------------------------------------------------------- WhatsApp share
+const WA_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#25D366"/><path fill="#fff" d="M16 7.2a8.8 8.8 0 0 0-7.6 13.2L7.2 24.8l4.5-1.2A8.8 8.8 0 1 0 16 7.2Zm0 16a7.2 7.2 0 0 1-3.7-1l-.3-.2-2.6.7.7-2.5-.2-.3A7.2 7.2 0 1 1 16 23.2Zm4-5.4c-.2-.1-1.3-.6-1.5-.7s-.4-.1-.5.1-.6.7-.7.9-.3.2-.5.1a5.9 5.9 0 0 1-2.9-2.6c-.2-.4.2-.4.6-1.2a.4.4 0 0 0 0-.4l-.7-1.6c-.2-.4-.4-.4-.5-.4h-.4a.8.8 0 0 0-.6.3 2.5 2.5 0 0 0-.8 1.9 4.4 4.4 0 0 0 .9 2.3 10 10 0 0 0 3.8 3.4c1.4.6 2 .7 2.7.6a2.3 2.3 0 0 0 1.5-1.1 1.9 1.9 0 0 0 .1-1.1c0-.1-.2-.2-.5-.3Z"/></svg>`;
+async function shareTrip(trip) {
+  if (!trip) return;
+  const link = location.origin + location.pathname + '#/trip/' + encodeURIComponent(trip.id);
+  const m = modal(`<h2>שיתוף בוואטסאפ</h2>
+    <p class="muted">לשתף גם את סיסמת הטיול באותה הודעה?<br>בלי הסיסמה, מי שמקבל את הקישור יצטרך לבקש אותה.</p>
+    <div class="stack"><button class="btn wa-go" data-pin>כן, עם הסיסמה</button><button class="btn ghost" data-link>רק קישור</button></div>`, { label: 'שיתוף בוואטסאפ' });
+  m.el.querySelector('[data-pin]').onclick = () => m.close('pin');
+  m.el.querySelector('[data-link]').onclick = () => m.close('link');
+  const how = await m.result;
+  if (!how) return;
+  let pin = '';
+  if (how === 'pin') {
+    const ok = await codePrompt({
+      title: 'סיסמת הטיול', text: 'הקלידו את 4 הספרות כדי לצרף אותן להודעה', length: 4, ok: 'לשתף', okClass: 'wa-go',
+      check: async code => { const good = await checkPin(trip, code); if (good) pin = code; return good; }
+    });
+    if (!ok) return;
+  }
+  const url = L.shareUrl(L.shareMessage(trip.name, link, pin));
+  if (!window.open(url, '_blank')) location.href = url; // popup blocked: hand over to WhatsApp in this window
+}
+
 // ---------------------------------------------------------------- install banner (Android / desktop Chrome, Edge)
 // (constants live inside: route() runs before this part of the module is reached)
 addEventListener('appinstalled', () => { window.ttInstall = null; drawInstall(); });
@@ -142,7 +166,7 @@ function homePage() {
           <span class="chip">👥 ${t.participants.length} משתתפים</span>
           <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
         </div>
-        ${left > 0 ? `<div class="lock">🔓 פתוח במכשיר הזה ${days <= 1 ? 'עד מחר' : `עוד ${days} ימים`}</div>` : ''}
+        ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? 'מחר' : `עוד ${days} ימים`} צריך להזין את הסיסמא שוב</div>` : ''}
       </article>`;
     }).join('');
     $$('.trip-card', host).forEach(card => {
@@ -213,7 +237,7 @@ function tripFormHtml(t, withPin) {
       <p class="err"></p>
     </div>
     ${withPin ? `<div class="field" data-f="pin"><label class="lbl" for="f-pin">סיסמת טיול (4 ספרות) *</label>
-      <input id="f-pin" class="code num" style="font-size:22px;letter-spacing:10px" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"><p class="err"></p></div>` : ''}`;
+      <input id="f-pin" class="code num" style="font-size:26px;letter-spacing:10px" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"><p class="err"></p></div>` : ''}`;
 }
 
 // Wires the form. lockedNames: participants that can't be removed (they have transactions).
@@ -321,8 +345,10 @@ async function tripPage(id) {
         <div class="filter" id="who" role="group" aria-label="סינון לפי משתתף"></div>
         <div class="wrap" style="margin-top:var(--s3)" id="settle"></div>
       </div>
-      <button class="fab" id="fab" title="הוספת תנועה" aria-label="הוספת תנועה">+</button>`;
+      <div class="share-row"><button class="wa" id="share">${WA_ICON}לשתף את הוצאות הטיול</button></div>
+      <button class="fab" id="fab"><span aria-hidden="true">+</span>להוסיף הוצאה</button>`;
     $('#editTrip').onclick = () => editTripSheet(st);
+    $('#share').onclick = () => shareTrip(st.trip);
     $('#fab').onclick = () => expenseSheet(st, null, 'expense');
     $$('[data-tab]').forEach(b => b.onclick = () => { st.tab = b.dataset.tab; drawTabs(); });
     $$('[data-ch]').forEach(b => b.onclick = () => { st.chart = b.dataset.ch; drawChart(); });
