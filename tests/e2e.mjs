@@ -150,6 +150,17 @@ try {
   await page.click('[data-ch=day]');
   await shot('03-bars');
 
+  // long description / comment must not widen the cards (bug 2026-11-16: one long word made every card 548px on a 390px phone)
+  const longOk = await page.evaluate(() => {
+    const t = document.querySelector('#txList .tx .t'); const old = t.textContent;
+    t.textContent = 'https://www.example.com/a-very-long-link-without-any-spaces-1234567890abcdefghijklmnopqrstuvwxyz ' + 'מילה '.repeat(60);
+    const list = document.querySelector('#txList').getBoundingClientRect().width;
+    const ok = [...document.querySelectorAll('#txList .tx')].every(c => c.getBoundingClientRect().width <= list + 1)
+      && document.documentElement.scrollWidth <= innerWidth + 1 && t.getBoundingClientRect().height < 80;
+    t.textContent = old; return ok;
+  });
+  ok('long description: cards stay screen-wide, text cut to 2 lines', longOk);
+
   // search
   await page.fill('#search', 'רכבל');
   ok('search filters', await page.locator('#txList .tx').count() === 1);
@@ -199,6 +210,27 @@ try {
   ok('edit keeps saved rate', (await page.locator('#x-rate').textContent()).includes('השער ששמור'));
   await page.fill('#x-amt', '60'); await page.click('#x-save'); await page.waitForTimeout(400);
   ok('edit saved', (await page.locator('#txList .tx', { hasText: 'רכבל לפסגה' }).textContent()).includes('60.00'));
+
+  // long comment saved through the form: cut to 2 lines, tap opens it, stays open after a search redraw
+  const rowR = () => page.locator('#txList .tx', { hasText: 'רכבל לפסגה' });
+  const oldCom = await (async () => { await rowR().locator('[data-edit]').click(); await page.waitForSelector('#x-com'); return page.locator('#x-com').inputValue(); })();
+  await page.fill('#x-com', 'https://www.example.com/receipts/a-very-long-link-without-any-spaces-1234567890abcdefghijklmnopqrstuvwxyz ' + 'הערה ארוכה מאוד '.repeat(5));
+  await page.click('#x-save'); await page.waitForTimeout(500);
+  const com = rowR().locator('.com');
+  const h0 = (await com.boundingBox()).height;
+  ok('long comment is cut (has tap-to-open)', await com.getAttribute('aria-expanded') === 'false' && (await com.getAttribute('class')).includes('cut'));
+  ok('short description has no tap-to-open', await rowR().locator('.t').getAttribute('role') === null);
+  await noHScroll('long comment');
+  await com.click(); await page.waitForTimeout(150);
+  ok('tap opens the full comment', await com.getAttribute('aria-expanded') === 'true' && (await com.boundingBox()).height > h0 + 20);
+  await page.fill('#search', 'רכבל'); await page.waitForTimeout(150);
+  ok('opened comment stays open after redraw', await rowR().locator('.com').getAttribute('aria-expanded') === 'true');
+  await page.fill('#search', '');
+  await rowR().locator('.com').click(); await page.waitForTimeout(150);
+  ok('tap again closes it', await rowR().locator('.com').getAttribute('aria-expanded') === 'false');
+  await shot('03b-long-comment');
+  await rowR().locator('[data-edit]').click(); await page.waitForSelector('#x-com');
+  await page.fill('#x-com', oldCom); await page.click('#x-save'); await page.waitForTimeout(400);
 
   // the two big add buttons are gone; income is chosen inside the sheet
   ok('top add buttons removed', await page.locator('#hero [data-add], #hero .add-top').count() === 0);

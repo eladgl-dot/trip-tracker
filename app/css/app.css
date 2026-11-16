@@ -230,6 +230,12 @@ input.code { font-size: 28px; letter-spacing: 14px; text-align: center; directio
 .tx .ic { width: 44px; height: 44px; flex: none; border-radius: var(--pill); display: grid; place-items: center; font-size: 24px; background: var(--bg); }
 .tx .mid { flex: 1; min-width: 0; }
 .tx .t { font-weight: 700; overflow-wrap: anywhere; }
+.tx .mid > * { overflow-wrap: anywhere; } /* comment/address too; the card must never get wider than the screen */
+.trip-card h3, .trip-card .muted { overflow-wrap: anywhere; }
+.tx .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.tx .clamp.cut { cursor: pointer; }
+.tx .clamp.cut:focus-visible { outline: 2px solid var(--sky-d); outline-offset: 2px; border-radius: 6px; }
+.tx .clamp.open { display: block; -webkit-line-clamp: unset; line-clamp: none; }
 .tx .acts { display: flex; gap: 6px; margin-top: 6px; }
 .tx .amt { text-align: left; font-weight: 800; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
 .tx .amt small { font-weight: 400; color: var(--ink3); font-size: 17px; }

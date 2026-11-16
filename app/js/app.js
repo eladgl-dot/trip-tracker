@@ -211,7 +211,7 @@ function homePage() {
       host.innerHTML = `<div class="empty"><div class="big">🗺️</div><p>עוד אין טיולים.<br>לחצו על "+ טיול חדש" כדי להתחיל.</p></div>`;
       return;
     }
-    host.style.display = 'grid'; host.style.gap = 'var(--s3)';
+    host.style.display = 'grid'; host.style.gridTemplateColumns = 'minmax(0, 1fr)'; host.style.gap = 'var(--s3)';
     host.innerHTML = trips.map(t => {
       const left = accessLeft(t.id);
       const days = Math.ceil(left / 86400000);
@@ -400,7 +400,7 @@ async function tripPage(id) {
         <div class="toolbar">
           <input class="search" id="search" type="search" placeholder="🔍 חיפוש: פירוט, הערה, קטגוריה, משלם" aria-label="חיפוש תנועות">
         </div>
-        <div id="txList" style="display:grid;gap:var(--s3)"></div>
+        <div id="txList" style="display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s3)"></div>
       </div>
       <div id="tabSettle" class="hidden">
         <div class="filter" id="who" role="group" aria-label="סינון לפי משתתף"></div>
@@ -427,6 +427,19 @@ async function tripPage(id) {
     $$('[data-tab]').forEach(b => b.onclick = () => { st.tab = b.dataset.tab; drawTabs(); });
     $$('[data-ch]').forEach(b => b.onclick = () => { if (st.chart === b.dataset.ch) return; st.chart = b.dataset.ch; st.focus = null; drawChart(); drawList(); });
     $('#search').oninput = e => { st.search = e.target.value; drawList(); };
+    const txHost = $('#txList');
+    txHost.addEventListener('click', ev => {
+      const el = ev.target.closest('.clamp.cut');
+      if (el && !String(getSelection?.() || '')) toggleClamp(el); // a drag to select text does not toggle
+    });
+    txHost.addEventListener('keydown', ev => {
+      const el = ev.target.closest('.clamp.cut');
+      if (el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); toggleClamp(el); }
+    });
+    let clampRaf = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(clampRaf); clampRaf = requestAnimationFrame(markClamps); });
+    ro.observe(txHost); cleanups.push(() => { ro.disconnect(); cancelAnimationFrame(clampRaf); });
+    document.fonts?.ready.then(() => { if (txHost.isConnected) markClamps(); });
     st.built = true;
   };
 
@@ -434,6 +447,29 @@ async function tripPage(id) {
     $$('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === st.tab));
     $('#tabList').classList.toggle('hidden', st.tab !== 'list');
     $('#tabSettle').classList.toggle('hidden', st.tab !== 'settle');
+    if (st.tab === 'list') markClamps();
+  };
+
+  // Long description/comment is cut to 2 lines with "…"; tapping it shows the whole text.
+  // Measured again after a redraw, tab switch, font load or resize. Opened texts stay open across redraws.
+  const openTexts = new Set();
+  const markClamps = () => $$('#txList .clamp').forEach(el => {
+    const k = el.dataset.k;
+    if (openTexts.has(k)) { el.classList.add('cut', 'open'); }
+    else {
+      if (!el.clientHeight) return; // hidden tab: measure later
+      el.classList.remove('open');
+      el.classList.toggle('cut', el.scrollHeight > el.clientHeight + 1);
+    }
+    const cut = el.classList.contains('cut');
+    if (cut) { el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-expanded', String(openTexts.has(k))); }
+    else { el.removeAttribute('tabindex'); el.removeAttribute('role'); el.removeAttribute('aria-expanded'); }
+  });
+  const toggleClamp = el => {
+    const k = el.dataset.k, open = !openTexts.has(k);
+    if (open) openTexts.add(k); else openTexts.delete(k);
+    el.classList.toggle('open', open); el.setAttribute('aria-expanded', String(open));
+    if (!open) markClamps();
   };
 
   const drawHero = () => {
@@ -503,9 +539,9 @@ async function tripPage(id) {
       return `<div class="card tx ${inc ? 'income' : ''}${dim ? ' dim' : ''}">
         <div class="ic" aria-hidden="true">${inc ? '↩️' : L.categoryEmoji(e.category)}</div>
         <div class="mid">
-          <div class="t">${esc(e.details)}</div>
+          <div class="t clamp" data-k="${esc(e.id)}:t">${esc(e.details)}</div>
           <div class="muted">${esc(e.category)} · ${inc ? 'התקבל ע"י' : 'שולם ע"י'} ${esc(e.paidBy)}</div>
-          ${e.comment ? `<div class="muted">💬 ${esc(e.comment)}</div>` : ''}
+          ${e.comment ? `<div class="muted com clamp" data-k="${esc(e.id)}:c">💬 ${esc(e.comment)}</div>` : ''}
           ${e.location ? `<a class="geo-link" href="${esc(L.mapsUrl(e.location))}" target="_blank" rel="noopener">📍 ${esc(e.address || 'מיקום במפה')}</a>` : ''}
           <div class="acts"><button class="mini" data-edit="${esc(e.id)}" title="עריכה" aria-label="עריכה">✏️</button>
             ${e.photoIds?.length ? `<button class="mini pics" data-pics="${esc(e.id)}" title="תמונות" aria-label="${e.photoIds.length} תמונות">📷 ${e.photoIds.length}</button>` : ''}
@@ -537,6 +573,7 @@ async function tripPage(id) {
     }
     host.innerHTML = html;
     $$('[data-edit]', host).forEach(b => b.onclick = () => expenseSheet(st, st.expenses.find(x => x.id === b.dataset.edit)));
+    markClamps();
     $$('[data-pics]', host).forEach(b => b.onclick = async () => {
       const pics = await store.getPhotos(st.trip.id, b.dataset.pics).catch(err => (reportError(err), []));
       const ok = pics.map(p => p.data).filter(L.isPhotoData);
@@ -590,7 +627,7 @@ async function tripPage(id) {
       }).join('')}
       <div class="card"><h2>💸 מי מעביר למי ${transfers.length ? `(${transfers.length} העברות)` : ''}</h2>
         ${!transfers.length ? `<p class="muted center">🎉 כולם מאוזנים, אין צורך בהעברות</p>` : !shown.length ? `<p class="muted center">ל${esc(st.who)} אין העברות</p>` :
-          `<div style="display:grid;gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">←</span><span class="muted">${units.find(u => u.name === x.from)?.isGroup ? 'מעבירים ל' : 'מעביר/ה ל'}</span> <b>${esc(x.to)}</b>
+          `<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">←</span><span class="muted">${units.find(u => u.name === x.from)?.isGroup ? 'מעבירים ל' : 'מעביר/ה ל'}</span> <b>${esc(x.to)}</b>
             <span class="amt money">${fmt(x.amount)}</span></div>`).join('')}</div>`}
         ${st.who && mine !== st.who ? `<p class="hint">${esc(st.who)} בקבוצה "${esc(mine)}" – מוצגות ההעברות של הקבוצה</p>` : ''}
         <p class="hint">חלוקה שווה של ההוצאות נטו בין ${t.participants.length} המשתתפים${groups.length ? `, מקובצים ל-${units.length}` : ''}</p>
