@@ -19,9 +19,36 @@ const ls = {
   get: k => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} }
 };
-const grantAccess = id => ls.set(ACCESS_KEY(id), String(Date.now() + L.ACCESS_MS));
+const grantAccess = id => { ls.set(ACCESS_KEY(id), String(Date.now() + L.ACCESS_MS)); addMine(id); };
 const accessLeft = id => Number(ls.get(ACCESS_KEY(id))) - Date.now();
 const isAdmin = () => sessionStorage.getItem('tt-admin') === '1';
+// "My trips" = trips this phone created or opened with the password (no accounts). Kept after the access expires.
+const MINE_KEY = 'tt-mine';
+let mineMem = null; // used when the browser blocks storage (some private modes)
+function mineIds() {
+  let list = null;
+  try { list = JSON.parse(ls.get(MINE_KEY)); } catch {}
+  if (!Array.isArray(list) && mineMem) return new Set(mineMem);
+  if (!Array.isArray(list)) { // first run after the update: every trip this phone ever unlocked is "mine"
+    list = [];
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith('tt-access:')) list.push(k.slice(10)); } } catch {}
+    ls.set(MINE_KEY, JSON.stringify(list));
+  }
+  mineMem = new Set(list);
+  return new Set(list);
+}
+const saveMine = set => { mineMem = new Set(set); ls.set(MINE_KEY, JSON.stringify([...set])); };
+const addMine = id => { const s = mineIds(); if (!s.has(id)) { s.add(id); saveMine(s); } };
+const removeMine = id => { const s = mineIds(); s.delete(id); saveMine(s); };
+
+let knownTags = []; // every tag used in any trip; filled by the home page, offered in the tag picker
+const tagChip = (tag, extra = '') => { const c = L.tagColor(tag); return `<span class="tag ${extra}" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(tag)}</bdi></span>`; };
+
+// Home view settings, remembered on this phone: scope 'mine'|'all', group 'year'|'tag'|'none', tag filter.
+const HOME_KEY = 'tt-home';
+const homePrefs = () => { try { return JSON.parse(ls.get(HOME_KEY)) || {}; } catch { return {}; } };
+const GROUP_NAMES = { year: 'לפי שנה', tag: 'לפי תגית', none: 'בלי קיבוץ' };
+
 const go = hash => { if (location.hash === hash) route(); else location.hash = hash; };
 // Writes resolve only after the server confirms; offline they are queued, so never block the UI on them.
 const fire = p => Promise.resolve(p).catch(reportError);
@@ -135,6 +162,8 @@ const HELP_STEPS = [
   ['מתחשבנים', 'בלשונית "התחשבנות" רואים מי מעביר כמה למי.']
 ];
 const HELP_MORE = [
+  ['⭐', 'הטיולים שלי', 'במסך הראשי רואים רק טיולים שיצרתם או פתחתם עם הסיסמה. טיולים של אחרים ב"כל הטיולים" – בלי סכומים ובלי שמות.'],
+  ['🏷️', 'תגיות, חיפוש וקיבוץ', '⋮ על טיול ← "תגיות" (משפחה, חברים, עבודה…). לחיצה על תגית מסננת; "קיבוץ" מסדר לפי שנה או תגית; 🔍 מחפש שם, מקום או תגית.'],
   ['📊', 'לאן הלך הכסף', '"פילוח" לפי קטגוריה או לפי יום, וממוצע ליום ולאדם. לחיצה על שורה מביאה את ההוצאות שלה לראש הרשימה.'],
   ['👨‍👩‍👧', 'זוגות ומשפחות', `מחלקים לקבוצות (עד ${L.MAX_GROUPS}), וכל קבוצה מתחשבנת כמו אדם אחד.`],
   ['↩️', 'החזר כספי', 'קיבלתם כסף בחזרה? מוסיפים "הכנסה" והיא יורדת מהסך הכול.'],
@@ -186,12 +215,20 @@ function homePage() {
       <button type="button" class="help-pill" id="helpBtn">❓ מה זה?</button>
       <button class="icon-btn" id="adminBtn" title="פאנל ניהול" aria-label="פאנל ניהול">⚙️</button>
     </header>
-    <div class="wrap">
+    <div class="wrap home">
       <div id="install"></div>
-      <a class="btn primary block" href="#/new">+ טיול חדש</a>
+      <input class="search" id="tripSearch" type="search" placeholder="🔍 חיפוש טיול, מקום, תגית" aria-label="חיפוש טיולים" autocomplete="off">
+      <div class="tabs scope" role="group" aria-label="אילו טיולים להציג">
+        <button type="button" data-scope="mine">⭐ שלי <span class="num" data-n="mine"></span></button>
+        <button type="button" data-scope="all">🌍 כל הטיולים <span class="num" data-n="all"></span></button>
+      </div>
+      <div class="tag-row" id="tagRow" role="group" aria-label="סינון לפי תגית"></div>
+      <div class="home-bar"><span id="homeCount" class="muted"></span>
+        <button type="button" class="pill-btn" id="groupBtn" aria-haspopup="menu"></button></div>
       <div id="trips"><div class="skeleton"></div></div>
       <p class="version muted small center">גרסה <span class="num" dir="ltr">${esc(window.TT_VERSION || '?')}</span></p>
-    </div>`;
+    </div>
+    <a class="fab" id="newTrip" href="#/new"><span aria-hidden="true">+</span>טיול חדש</a>`;
   $('#adminBtn').onclick = askAdmin;
   $('#helpBtn').onclick = helpSheet;
   if (!helpSeen()) { // first visit on this device: open once
@@ -201,50 +238,182 @@ function homePage() {
   drawInstall();
   addEventListener('tt-install', drawInstall); cleanups.push(() => removeEventListener('tt-install', drawInstall));
   const host = $('#trips');
-  const closeMenus = e => { if (!e.target.closest('.kebab, .menu')) $$('.menu', host).forEach(m => m.remove()); };
+  const closeMenus = e => { if (!e.target.closest('.kebab, .menu, #groupBtn')) $$('.menu').forEach(m => m.remove()); };
   document.addEventListener('click', closeMenus);
   cleanups.push(() => document.removeEventListener('click', closeMenus));
 
-  cleanups.push(store.onTrips(trips => {
-    trips.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '') || (b.createdAtMs || 0) - (a.createdAtMs || 0));
+  let alive = true; cleanups.push(() => { alive = false; });
+  const p = homePrefs();
+  const st = { trips: null, query: '', scope: ['mine', 'all'].includes(p.scope) ? p.scope : '', scopeChosen: ['mine', 'all'].includes(p.scope), group: GROUP_NAMES[p.group] ? p.group : 'year', tag: p.tag || '', toggled: new Set() };
+  const savePrefs = () => ls.set(HOME_KEY, JSON.stringify({ scope: st.scopeChosen ? st.scope : undefined, group: st.group, tag: st.tag })); // an auto-picked tab is not remembered
+
+  const card = (t, mine) => {
+    const tags = (t.tags || []).map(x => tagChip(x)).join('');
+    if (!mine) return `<article class="card trip-card other" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)} – פתיחה עם סיסמה">
+        <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
+        <h3><bdi>${esc(t.name)}</bdi></h3>
+        <div class="muted">📍 <bdi>${esc(t.location)}</bdi>${t.startDate ? ` · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}</div>
+        <div class="tags">${tags}<span class="muted small">🔒 פתיחה עם סיסמה</span></div>
+      </article>`;
+    const left = accessLeft(t.id);
+    const days = Math.ceil(left / 86400000);
+    return `<article class="card trip-card" style="background:${tripBg(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
+        <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
+        <h3><bdi>${esc(t.name)}</bdi>${st.scope === 'all' ? ' <span class="star" title="שלי" aria-label="שלי">⭐</span>' : ''}</h3>
+        <div class="muted">📍 <bdi>${esc(t.location)}</bdi></div>
+        <div class="chips">
+          ${t.startDate ? `<span class="chip sky num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}
+          <span class="chip">👥 ${t.participants.length} משתתפים</span>
+          <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
+        </div>
+        ${tags ? `<div class="tags">${tags}</div>` : ''}
+        ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? 'מחר' : `עוד ${days} ימים`} צריך להזין את הסיסמא שוב</div>` : ''}
+      </article>`;
+  };
+
+  const draw = () => {
+    if (!st.trips) return;
+    const trips = st.trips, mine = mineIds();
+    if (!st.scope) st.scope = trips.some(t => mine.has(t.id)) ? 'mine' : 'all'; // nothing of mine yet: show everything
+    knownTags = L.allTags(trips);
+    if (st.tag && !knownTags.some(x => x.toLowerCase() === st.tag.toLowerCase())) st.tag = '';
+    const nMine = trips.filter(t => mine.has(t.id)).length;
+    $('[data-n=mine]').textContent = `(${nMine})`; $('[data-n=all]').textContent = `(${trips.length})`;
+    $$('[data-scope]').forEach(b => { b.setAttribute('aria-selected', b.dataset.scope === st.scope); b.setAttribute('aria-pressed', b.dataset.scope === st.scope); });
+    // tag filter: only tags that appear in the trips of the current tab
+    const scopeTags = L.allTags(st.scope === 'all' ? trips : trips.filter(t => mine.has(t.id)));
+    if (st.tag && !scopeTags.some(x => x.toLowerCase() === st.tag.toLowerCase())) scopeTags.unshift(st.tag);
+    $('#tagRow').innerHTML = scopeTags.length ? `<button type="button" class="tag-f ${st.tag ? '' : 'on'}" data-tag="" aria-pressed="${!st.tag}">הכל</button>`
+      + scopeTags.map(x => { const c = L.tagColor(x); return `<button type="button" class="tag-f ${st.tag === x ? 'on' : ''}" data-tag="${esc(x)}" aria-pressed="${st.tag === x}" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(x)}</bdi>${st.tag === x ? ' ✓' : ''}</button>`; }).join('') : '';
+    $('#groupBtn').textContent = `קיבוץ: ${GROUP_NAMES[st.group]} ▾`;
+
+    const opts = { mine, scope: st.scope, tag: st.tag, query: st.query };
+    const shown = L.filterTrips(trips, opts);
+    const filtered = !!(st.query.trim() || st.tag);
+    const total = st.scope === 'all' ? trips.length : nMine;
+    $('#homeCount').innerHTML = filtered ? `<b class="num">${shown.length}</b> מתוך <span class="num">${total}</span>` : `<span class="num">${shown.length}</span> טיולים`;
+    host.style.display = 'grid'; host.style.gridTemplateColumns = 'minmax(0, 1fr)'; host.style.gap = 'var(--s3)';
+
     if (!trips.length) {
       host.innerHTML = `<div class="empty"><div class="big">🗺️</div><p>עוד אין טיולים.<br>לחצו על "+ טיול חדש" כדי להתחיל.</p></div>`;
       return;
     }
-    host.style.display = 'grid'; host.style.gridTemplateColumns = 'minmax(0, 1fr)'; host.style.gap = 'var(--s3)';
-    host.innerHTML = trips.map(t => {
-      const left = accessLeft(t.id);
-      const days = Math.ceil(left / 86400000);
-      return `<article class="card trip-card" style="background:${tripBg(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
-        <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
-        <h3>${esc(t.name)}</h3>
-        <div class="muted">📍 ${esc(t.location)}</div>
-        <div class="chips">
-          <span class="chip sky num">${esc(dateRange(t.startDate, t.endDate))}</span>
-          <span class="chip">👥 ${t.participants.length} משתתפים</span>
-          <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
-        </div>
-        ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? 'מחר' : `עוד ${days} ימים`} צריך להזין את הסיסמא שוב</div>` : ''}
-      </article>`;
-    }).join('');
-    $$('.trip-card', host).forEach(card => {
-      const trip = trips.find(t => t.id === card.dataset.id);
-      card.onclick = e => { if (!e.target.closest('.kebab, .menu')) openTrip(trip); };
-      card.onkeydown = e => { if (e.key === 'Enter' && e.target === card) openTrip(trip); };
-      $('.kebab', card).onclick = e => {
+    let html = '';
+    if (!shown.length) {
+      html = st.scope === 'mine' && !nMine
+        ? `<div class="empty"><div class="big">⭐</div><p>עוד אין טיולים שלך בטלפון הזה.<br>טיול שתיצרו או תפתחו עם הסיסמה יופיע כאן.</p></div>`
+        : `<div class="empty">לא נמצאו טיולים${st.query.trim() ? ` עבור "<bdi>${esc(st.query.trim())}</bdi>"` : ''}${st.tag ? ` עם התגית "<bdi>${esc(st.tag)}</bdi>"` : ''}</div>`;
+    } else {
+      const groups = L.groupTrips(shown, st.group, st.tag);
+      html = groups.map((g, i) => {
+        const defOpen = filtered || st.group !== 'year' || i === 0 || g.label === String(new Date().getFullYear());
+        const open = st.toggled.has(g.key) ? !defOpen : defOpen;
+        const head = !g.label ? '' : `<button type="button" class="sec ${open ? '' : 'closed'}" data-sec="${esc(g.key)}" aria-expanded="${open}">
+            ${g.tag ? tagChip(g.tag) : `<span><bdi>${esc(g.label)}</bdi></span>`}
+            <span class="cnt">· <span class="num">${g.trips.length}</span> ${g.trips.length === 1 ? 'טיול' : 'טיולים'}</span><span class="chev" aria-hidden="true">${open ? '▾' : '◂'}</span></button>`;
+        return head + (open ? g.trips.map(t => card(t, mine.has(t.id))).join('') : '');
+      }).join('');
+    }
+    if (st.scope === 'mine' && (filtered || !nMine)) { // more matches outside "mine"
+      const more = L.filterTrips(trips, { ...opts, scope: 'all' }).filter(t => !mine.has(t.id)).length;
+      if (more) html += `<button type="button" class="hint" data-scope-all>🌍 ${more === 1 ? 'עוד טיול אחד מתאים' : `עוד <span class="num">${more}</span> טיולים מתאימים`} ב"כל הטיולים" – להציג</button>`;
+    }
+    host.innerHTML = html;
+
+    $$('.trip-card', host).forEach(c => {
+      const trip = trips.find(t => t.id === c.dataset.id);
+      c.onclick = e => { if (!e.target.closest('.kebab, .menu')) openTrip(trip); };
+      c.onkeydown = e => { if (e.key === 'Enter' && e.target === c) openTrip(trip); };
+      $('.kebab', c).onclick = e => {
         e.stopPropagation();
-        const had = $('.menu', card);
-        $$('.menu', host).forEach(m => m.remove());
+        const had = $('.menu', c);
+        $$('.menu').forEach(m => m.remove());
         if (had) return;
-        card.insertAdjacentHTML('beforeend', `<div class="menu" role="menu"><button class="red" role="menuitem">🗑️ מחיקת טיול</button></div>`);
-        $('.menu button', card).onclick = ev => { ev.stopPropagation(); $('.menu', card).remove(); deleteTripFlow(trip); };
+        const isMine = mine.has(trip.id);
+        c.insertAdjacentHTML('beforeend', `<div class="menu" role="menu">
+          <button role="menuitem" data-m="tags">🏷️ תגיות</button>
+          ${isMine ? `<button role="menuitem" data-m="unmine">🙈 להסיר מהטיולים שלי</button>` : `<button role="menuitem" data-m="mine">⭐ להוסיף לטיולים שלי</button>`}
+          <button class="red" role="menuitem" data-m="del">🗑️ מחיקת טיול</button></div>`);
+        $$('.menu button', c).forEach(b => b.onclick = async ev => {
+          ev.stopPropagation(); $('.menu', c).remove();
+          const m = b.dataset.m;
+          if (m === 'del') deleteTripFlow(trip);
+          else if (m === 'unmine') { removeMine(trip.id); toast('הוסר מ"שלי". הטיול עצמו לא נמחק'); draw(); }
+          else if (m === 'mine') { if (await unlock(trip) && alive) { toast('נוסף ל"שלי" ⭐', 'good'); draw(); } }
+          else if (m === 'tags') { if (await unlock(trip) && alive) { draw(); tagSheet(trip); } }
+        });
       };
     });
+  };
+
+  const onHomeClick = e => {
+    const s = e.target.closest('[data-scope]');
+    if (s) { st.scope = s.dataset.scope; st.scopeChosen = true; savePrefs(); draw(); return; }
+    if (e.target.closest('[data-scope-all]')) { st.scope = 'all'; st.scopeChosen = true; savePrefs(); draw(); return; }
+    const tg = e.target.closest('[data-tag]');
+    if (tg) { st.tag = st.tag === tg.dataset.tag ? '' : tg.dataset.tag; savePrefs(); draw(); return; }
+    const sec = e.target.closest('[data-sec]');
+    if (sec) { const k = sec.dataset.sec; st.toggled.has(k) ? st.toggled.delete(k) : st.toggled.add(k); draw(); return; }
+    if (e.target.closest('#groupBtn')) {
+      const had = $('#groupMenu'); $$('.menu').forEach(m => m.remove());
+      if (had) return;
+      $('.home-bar').insertAdjacentHTML('beforeend', `<div class="menu" id="groupMenu" role="menu">${Object.entries(GROUP_NAMES).map(([k, n]) =>
+        `<button role="menuitemradio" aria-checked="${st.group === k}" data-group="${k}">${st.group === k ? '✓ ' : ''}${n}</button>`).join('')}</div>`);
+      return;
+    }
+    const g = e.target.closest('[data-group]');
+    if (g) { st.group = g.dataset.group; st.toggled.clear(); savePrefs(); $('#groupMenu')?.remove(); draw(); }
+  };
+  view.addEventListener('click', onHomeClick); cleanups.push(() => view.removeEventListener('click', onHomeClick));
+  $('#tripSearch').oninput = e => { st.query = e.target.value; draw(); };
+
+  cleanups.push(store.onTrips(trips => {
+    st.trips = trips.map(t => ({ ...t, tags: L.normTags(t.tags) }));
+    draw();
   }, err => { host.innerHTML = `<div class="empty"><div class="big">🔒</div><p>אין גישה לנתונים.</p></div>`; reportError(err); }));
 }
 
+// Tag picker used in the trip form and in the ⋮ → תגיות sheet. Returns a getter for the chosen tags.
+function bindTagPicker(root, initial) {
+  let tags = L.normTags(initial);
+  const box = $('.tagpick', root), input = $('.tagpick-in', root);
+  const draw = () => {
+    const sugg = knownTags.filter(x => !tags.some(y => y.toLowerCase() === x.toLowerCase())).slice(0, 12);
+    $('.tp-on', box).innerHTML = tags.length ? tags.map((x, i) => { const c = L.tagColor(x);
+      return `<span class="tag" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(x)}</bdi><button type="button" data-rmtag="${i}" aria-label="הסרת התגית ${esc(x)}">✕</button></span>`; }).join('')
+      : '<span class="muted small">אין עדיין תגיות</span>';
+    $('.tp-sugg', box).innerHTML = sugg.map(x => `<button type="button" class="tag add" data-addtag="${esc(x)}">+ <bdi>${esc(x)}</bdi></button>`).join('');
+  };
+  const add = name => {
+    const next = L.normTags([...tags, name]);
+    if (next.length === tags.length && name.trim()) { toast(tags.length >= L.MAX_TAGS ? `עד ${L.MAX_TAGS} תגיות לטיול` : 'התגית כבר קיימת'); return; }
+    tags = next; draw();
+  };
+  box.addEventListener('click', e => {
+    const rm = e.target.closest('[data-rmtag]'); if (rm) { tags.splice(+rm.dataset.rmtag, 1); draw(); return; }
+    const ad = e.target.closest('[data-addtag]'); if (ad) add(ad.dataset.addtag);
+  });
+  const addTyped = () => { if (input.value.trim()) { add(input.value); input.value = ''; input.focus(); } };
+  $('.tagpick-add', root).onclick = addTyped;
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } });
+  draw();
+  return () => { if (input.value.trim()) { tags = L.normTags([...tags, input.value]); input.value = ''; } return tags; };
+}
+function tagPickerHtml() { return `<div class="field tagpick"><span class="lbl">תגיות <span class="small">(למשל: משפחה, חברים, עבודה)</span></span>
+    <div class="tags tp-on"></div><div class="tags tp-sugg"></div>
+    <div class="chip-input"><input class="tagpick-in" maxlength="20" placeholder="תגית חדשה…" autocomplete="off" enterkeyhint="done" aria-label="תגית חדשה"><button type="button" class="btn ghost sm tagpick-add">הוספה</button></div></div>`; }
+
+function tagSheet(trip) {
+  const m = modal(`<h2>🏷️ תגיות – <bdi>${esc(trip.name)}</bdi></h2>${tagPickerHtml()}
+    <p class="muted small">התגיות משותפות: כל מי שפותח את הטיול רואה אותן.</p>
+    <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button type="button" class="btn primary" data-save>שמירה</button></div>`, { sheet: true, label: 'תגיות' });
+  const read = bindTagPicker(m.el, trip.tags);
+  $('[data-x]', m.el).onclick = () => m.close();
+  $('[data-save]', m.el).onclick = () => { fire(store.updateTrip(trip.id, { tags: read() })); m.close(); toast('התגיות נשמרו', 'good'); };
+}
+
 async function unlock(trip) {
-  if (accessLeft(trip.id) > 0) return true;
+  if (accessLeft(trip.id) > 0) { addMine(trip.id); return true; } // opening a trip makes it "mine" again
   const ok = await codePrompt({
     title: '🔒 ' + trip.name, text: 'סיסמת הטיול (4 ספרות)', length: 4,
     note: 'הגישה תישמר במכשיר הזה ל-3 ימים', check: code => checkPin(trip, code)
@@ -291,6 +460,7 @@ function tripFormHtml(t, withPin) {
     <div class="field"><span class="lbl" id="f-color-l">צבע הטיול</span>
       <div class="swatches" id="f-color" role="radiogroup" aria-labelledby="f-color-l">${L.TRIP_COLORS.map(c => `<button type="button" role="radio" class="sw"
         data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${c.name}" title="${c.name}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
+    ${tagPickerHtml()}
     <div class="field" data-f="participants">
       <label class="lbl" for="f-person">משתתפים * <span class="small">(⭐ = ברירת המחדל ב"מי שילם"; לחיצה על שם הופכת אותו לראשון)</span></label>
       <div class="chips" id="f-chips" style="margin-bottom:8px"></div>
@@ -329,6 +499,7 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     color = b.dataset.color;
     $$('[data-color]', root).forEach(x => x.setAttribute('aria-checked', x === b));
   });
+  const readTags = bindTagPicker(root, t.tags);
   const pin = $('#f-pin', root);
   if (pin) pin.addEventListener('input', () => pin.value = pin.value.replace(/\D/g, '').slice(0, 4));
   draw();
@@ -338,7 +509,7 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     const data = {
       name: $('#f-name', root).value.trim(), location: $('#f-loc', root).value.trim(),
       startDate: $('#f-start', root).value, endDate: $('#f-end', root).value,
-      defaultCurrency: $('#f-cur', root).value, participants: [...people], color
+      defaultCurrency: $('#f-cur', root).value, participants: [...people], color, tags: readTags()
     };
     if (pin) data.pin = pin.value;
     const errors = L.validateTrip(data);

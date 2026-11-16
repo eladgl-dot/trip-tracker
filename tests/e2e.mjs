@@ -381,6 +381,56 @@ try {
   ok('new trip opens', (await page.locator('#hero h1').textContent()).includes('אילת'));
   ok('empty state', (await page.locator('#txList').textContent()).includes('עדיין אין תנועות'));
 
+  // home: my trips, tags, filter, search, grouping (Step 20)
+  await page.goto(BASE + '#/'); await page.waitForSelector('.trip-card');
+  const cards = () => page.locator('#trips .trip-card');
+  const card2 = name => page.locator('#trips .trip-card', { hasText: name });
+  ok('home: search, mine/all tabs, group pill', await page.locator('#tripSearch').count() === 1 && await page.locator('[data-scope]').count() === 2 && (await page.locator('#groupBtn').textContent()).includes('לפי שנה'));
+  ok('home: created + opened trips are "mine"', (await page.locator('[data-n=mine]').textContent()).includes('2') && await page.locator('[data-scope=mine]').getAttribute('aria-selected') === 'true' && await cards().count() === 2);
+  ok('home: "+ טיול חדש" floating', await page.locator('a.fab[href="#/new"]').count() === 1);
+  await card2('אילת').locator('.kebab').click();
+  ok('⋮ menu: tags, remove from mine, delete', await page.locator('.menu [data-m]').count() === 3 && await page.locator('.menu [data-m=unmine]').count() === 1);
+  await page.click('.menu [data-m=tags]'); await page.waitForSelector('.sheet .tagpick');
+  await page.fill('.tagpick-in', 'משפחה'); await page.keyboard.press('Enter');
+  await page.fill('.tagpick-in', 'סקי'); await page.click('.tagpick-add');
+  await page.fill('.tagpick-in', 'סקי'); await page.keyboard.press('Enter');
+  ok('tag picker: no duplicate tags', await page.locator('.tp-on .tag').count() === 2);
+  await shot('11a-tags'); await page.click('.sheet [data-save]'); await page.waitForTimeout(400);
+  ok('tags shown on the card', (await card2('אילת').locator('.tags').textContent()).includes('סקי'));
+  await card2('איטליה').locator('.kebab').click(); await page.click('.menu [data-m=tags]'); await page.waitForSelector('.sheet .tagpick');
+  ok('tag picker suggests tags from other trips', await page.locator('.tp-sugg [data-addtag="משפחה"]').count() === 1);
+  await page.click('.tp-sugg [data-addtag="משפחה"]'); await page.click('.sheet [data-save]'); await page.waitForTimeout(400);
+  await page.click('#tagRow [data-tag="סקי"]');
+  ok('tag filter: only trips with the tag', await cards().count() === 1 && (await page.locator('#homeCount').textContent()).includes('1'));
+  await page.click('#tagRow [data-tag="סקי"]');
+  ok('tap tag again clears filter', await cards().count() === 2);
+  await page.fill('#tripSearch', 'אילת');
+  ok('search by place', await cards().count() === 1);
+  await page.fill('#tripSearch', 'ליב');
+  ok('search my trips by participant', await cards().count() === 1 && await card2('איטליה').count() === 1);
+  await page.fill('#tripSearch', 'zzzz');
+  ok('search with no result', (await page.locator('#trips .empty').textContent()).includes('לא נמצאו'));
+  await page.fill('#tripSearch', '');
+  await page.click('#groupBtn'); await page.click('[data-group=tag]'); await page.waitForTimeout(150);
+  ok('group by tag: section per first tag', (await page.locator('#trips .sec').first().textContent()).includes('משפחה') && (await page.locator('#groupBtn').textContent()).includes('לפי תגית'));
+  await page.click('#groupBtn'); await page.click('[data-group=year]'); await page.waitForTimeout(150);
+  ok('group by year: year sections', await page.locator('#trips .sec').count() >= 1 && /\d{4}/.test(await page.locator('#trips .sec').first().textContent()));
+  await noHScroll('home redesign'); await shot('11b-home');
+  // remove from mine → shows in "all" without names, can be added back
+  await card2('אילת').locator('.kebab').click(); await page.click('.menu [data-m=unmine]'); await page.waitForTimeout(200);
+  ok('remove from mine', await cards().count() === 1 && (await page.locator('[data-n=mine]').textContent()).includes('1'));
+  await page.click('[data-scope=all]');
+  ok('all trips: other trip is plain, no participants', await cards().count() === 2 && await card2('אילת').evaluate(c => c.classList.contains('other')) && !(await card2('אילת').textContent()).includes('משתתפים'));
+  await page.fill('#tripSearch', 'שני');
+  ok('all trips: participant names not searchable in other trips', await card2('איטליה').count() === 1 && await card2('אילת').count() === 0);
+  await page.fill('#tripSearch', '');
+  await shot('11c-all');
+  await card2('אילת').locator('.kebab').click(); await page.click('.menu [data-m=mine]'); await page.waitForTimeout(300);
+  await page.click('[data-scope=mine]');
+  ok('add back to mine', await cards().count() === 2);
+  await page.reload(); await page.waitForSelector('.trip-card');
+  ok('home view remembered after reload', await page.locator('[data-scope=mine]').getAttribute('aria-selected') === 'true' && (await page.locator('#groupBtn').textContent()).includes('לפי שנה'));
+
   // admin
   await page.goto(BASE + '#/'); await page.waitForSelector('#adminBtn');
   await page.click('#adminBtn'); await page.fill('input.code', '111111'); await page.click('.dialog button.primary');
@@ -410,7 +460,7 @@ try {
   const before = await page.locator('.trip-card').count();
   await page.locator('.trip-card', { hasText: 'אילת' }).locator('.kebab').click();
   await page.evaluate(() => sessionStorage.removeItem('tt-admin'));
-  await page.click('.menu button'); await page.waitForSelector('input.code');
+  await page.click('.menu [data-m=del]'); await page.waitForSelector('input.code');
   ok('delete asks for admin code', (await page.locator('.dialog h2').textContent()).includes('מחיקת טיול'));
   await page.locator('input.code').pressSequentially('123456'); await page.click('.dialog button.primary'); await page.waitForTimeout(200);
   ok('delete: wrong admin code rejected', (await page.locator('.dialog .err').textContent()).includes('שגוי'));

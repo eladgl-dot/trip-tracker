@@ -198,6 +198,63 @@ export const TRIP_COLORS = [
 ];
 export const tripColor = key => TRIP_COLORS.find(c => c.key === key) || TRIP_COLORS[0];
 
+// ---------- home: tags, search, grouping ----------
+export const MAX_TAGS = 10;
+export const NO_DATE = 'ללא תאריך';
+export const NO_TAG = 'ללא תגית';
+// Soft pastel chip colors; a tag's color comes from its name, so it is the same on every phone.
+export const TAG_COLORS = [
+  { bg: '#FFE4E6', ink: '#9F1239' }, { bg: '#DCFCE7', ink: '#166534' }, { bg: '#E0E7FF', ink: '#3730A3' }, { bg: '#FEF3C7', ink: '#92400E' },
+  { bg: '#CFFAFE', ink: '#155E75' }, { bg: '#F3E8FF', ink: '#6B21A8' }, { bg: '#FFEDD5', ink: '#9A3412' }, { bg: '#E2E8F0', ink: '#334155' }
+];
+export function tagColor(name) {
+  let h = 0;
+  for (const ch of String(name || '').toLowerCase()) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+export function normTags(list) {
+  const out = [];
+  if (!Array.isArray(list)) return out;
+  for (const raw of list) {
+    const t = [...String(raw || '').trim().replace(/\s+/g, ' ')].slice(0, 20).join('').trim(); // by character, so an emoji is never cut in half
+    if (t && !out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  return out.slice(0, MAX_TAGS);
+}
+// Tags compare without case ("Family" = "family"); the first spelling seen is shown.
+const tagKey = t => String(t || '').toLowerCase();
+export const hasTag = (trip, tag) => (trip.tags || []).some(x => tagKey(x) === tagKey(tag));
+export function allTags(trips) {
+  const n = new Map();
+  for (const t of trips) for (const tag of t.tags || []) { const k = tagKey(tag), v = n.get(k); n.set(k, v ? { ...v, n: v.n + 1 } : { name: tag, n: 1 }); }
+  return [...n.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, 'he')).map(x => x.name);
+}
+// Participant names are searchable only in my own trips (owner: other people's names stay hidden).
+export function tripMatches(t, query, mine) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return true;
+  const fields = [t.name, t.location, ...(t.tags || []), ...(mine ? t.participants || [] : [])];
+  return fields.some(f => (f || '').toLowerCase().includes(q));
+}
+export function filterTrips(trips, { mine = new Set(), scope = 'mine', tag = '', query = '' } = {}) {
+  return trips.filter(t => (scope === 'all' || mine.has(t.id)) && (!tag || hasTag(t, tag)) && tripMatches(t, query, mine.has(t.id)));
+}
+export const sortTrips = trips => [...trips].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '') || (b.createdAtMs || 0) - (a.createdAtMs || 0));
+// mode 'year' | 'tag' | 'none' → [{ key, label, tag?, trips }]. By tag with a tag filter on: every trip goes under the filtered tag.
+export function groupTrips(trips, mode, filterTag = '') {
+  const sorted = sortTrips(trips);
+  if (!sorted.length) return [];
+  if (mode === 'none') return [{ key: 'all', label: '', trips: sorted }];
+  const map = new Map();
+  for (const t of sorted) {
+    const k = mode === 'tag' ? (filterTag && hasTag(t, filterTag) ? filterTag : t.tags?.[0] || '') : (t.startDate || '').slice(0, 4);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(t);
+  }
+  const keys = [...map.keys()].sort((a, b) => !a - !b || (mode === 'tag' ? a.localeCompare(b, 'he') : b.localeCompare(a)));
+  return keys.map(k => ({ key: mode + ':' + k, label: k || (mode === 'tag' ? NO_TAG : NO_DATE), ...(mode === 'tag' && k ? { tag: k } : {}), trips: map.get(k) }));
+}
+
 // ---------- search ----------
 export function matchesSearch(e, query) {
   const q = query.trim().toLowerCase();

@@ -254,3 +254,78 @@ test('focusSplit: missing category matches "ללא קטגוריה" like the char
   const r = L.focusSplit(list, { kind: 'cat', name: L.UNCATEGORIZED });
   assert.deepEqual(r.first.map(e => e.id), ['a']);
 });
+
+// ---------- home: my trips, tags, search, grouping (Step 20) ----------
+const trip = (id, extra = {}) => ({ id, name: 'טיול ' + id, location: 'מקום', participants: ['אלעד'], startDate: '2026-08-12', tags: [], ...extra });
+
+test('normTags: trims, drops empty, removes duplicates (any case), max 10, max 20 chars', () => {
+  assert.deepEqual(L.normTags([' משפחה ', '', 'Ski', 'ski', 'משפחה']), ['משפחה', 'Ski']);
+  assert.equal(L.normTags(Array.from({ length: 15 }, (_, i) => 't' + i)).length, L.MAX_TAGS);
+  assert.equal(L.normTags(['x'.repeat(40)])[0].length, 20);
+  assert.deepEqual(L.normTags(undefined), []);
+});
+test('tagColor: same tag always the same color, from the palette', () => {
+  assert.deepEqual(L.tagColor('משפחה'), L.tagColor('משפחה'));
+  assert.ok(L.TAG_COLORS.includes(L.tagColor('עבודה')));
+  assert.ok(L.TAG_COLORS.includes(L.tagColor('')));
+});
+test('allTags: every tag once, most used first', () => {
+  const ts = [trip('a', { tags: ['חו״ל', 'משפחה'] }), trip('b', { tags: ['משפחה'] }), trip('c')];
+  assert.deepEqual(L.allTags(ts), ['משפחה', 'חו״ל']);
+});
+test('tripMatches: name, location, tags; participants only for my trips', () => {
+  const t = trip('a', { name: 'איטליה', location: 'צפון', participants: ['איתי'], tags: ['משפחה'] });
+  assert.ok(L.tripMatches(t, 'איט', false));
+  assert.ok(L.tripMatches(t, 'צפו', false));
+  assert.ok(L.tripMatches(t, 'משפ', false));
+  assert.ok(L.tripMatches(t, '', false));
+  assert.ok(!L.tripMatches({ ...t, name: 'יוון' }, 'איתי', false), 'other people\'s names never searchable');
+  assert.ok(L.tripMatches({ ...t, name: 'יוון' }, 'איתי', true));
+  assert.ok(L.tripMatches(trip('b', { name: 'Rome' }), 'ROME', false));
+});
+test('filterTrips: scope, tag and search together', () => {
+  const ts = [trip('a', { tags: ['משפחה'] }), trip('b', { tags: ['חברים'] }), trip('c', { tags: ['משפחה'], name: 'יוון' })];
+  const mine = new Set(['a', 'b']);
+  assert.deepEqual(L.filterTrips(ts, { mine, scope: 'mine' }).map(t => t.id), ['a', 'b']);
+  assert.deepEqual(L.filterTrips(ts, { mine, scope: 'all' }).map(t => t.id), ['a', 'b', 'c']);
+  assert.deepEqual(L.filterTrips(ts, { mine, scope: 'all', tag: 'משפחה' }).map(t => t.id), ['a', 'c']);
+  assert.deepEqual(L.filterTrips(ts, { mine, scope: 'all', tag: 'משפחה', query: 'יוו' }).map(t => t.id), ['c']);
+});
+test('sortTrips: newest start date first, then newest created', () => {
+  const ts = [trip('a', { startDate: '2025-01-01' }), trip('b', { startDate: '2026-01-01', createdAtMs: 1 }), trip('c', { startDate: '2026-01-01', createdAtMs: 2 }), trip('d', { startDate: '' })];
+  assert.deepEqual(L.sortTrips(ts).map(t => t.id), ['c', 'b', 'a', 'd']);
+});
+test('groupTrips by year: newest year first, no date last', () => {
+  const ts = [trip('a', { startDate: '2025-05-01' }), trip('b', { startDate: '2026-01-01' }), trip('c', { startDate: '' }), trip('d', { startDate: '2026-09-01' })];
+  const g = L.groupTrips(ts, 'year');
+  assert.deepEqual(g.map(x => x.label), ['2026', '2025', L.NO_DATE]);
+  assert.deepEqual(g[0].trips.map(t => t.id), ['d', 'b']);
+});
+test('groupTrips by tag: under the first tag, "ללא תגית" last', () => {
+  const ts = [trip('a', { tags: ['משפחה', 'חו״ל'] }), trip('b', { tags: ['חברים'] }), trip('c'), trip('d', { tags: ['משפחה'] })];
+  const g = L.groupTrips(ts, 'tag');
+  assert.deepEqual(g.map(x => x.label), ['חברים', 'משפחה', L.NO_TAG]);
+  assert.deepEqual(g[1].trips.map(t => t.id), ['a', 'd']);
+  assert.equal(g[0].tag, 'חברים');
+});
+test('groupTrips none: one group without a label', () => {
+  const g = L.groupTrips([trip('a'), trip('b')], 'none');
+  assert.equal(g.length, 1); assert.equal(g[0].label, ''); assert.equal(g[0].trips.length, 2);
+  assert.deepEqual(L.groupTrips([], 'year'), []);
+});
+test('normTags: string input is ignored, emoji not cut in half', () => {
+  assert.deepEqual(L.normTags('משפחה'), []);
+  const t = L.normTags(['😀'.repeat(25)])[0];
+  assert.equal([...t].length, 20); assert.ok(!/[\uD800-\uDBFF]$/.test(t));
+});
+test('tags ignore case: one filter chip, same color, filter matches', () => {
+  const ts = [trip('a', { tags: ['Family'] }), trip('b', { tags: ['family'] })];
+  assert.deepEqual(L.allTags(ts), ['Family']);
+  assert.deepEqual(L.tagColor('Family'), L.tagColor('family'));
+  assert.equal(L.filterTrips(ts, { scope: 'all', tag: 'family' }).length, 2);
+});
+test('groupTrips by tag with a tag filter: trips go under the filtered tag', () => {
+  const ts = [trip('a', { tags: ['משפחה', 'עבודה'] }), trip('b', { tags: ['עבודה'] })];
+  const g = L.groupTrips(ts, 'tag', 'עבודה');
+  assert.equal(g.length, 1); assert.equal(g[0].label, 'עבודה'); assert.equal(g[0].trips.length, 2);
+});
