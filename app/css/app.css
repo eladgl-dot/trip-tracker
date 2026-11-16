@@ -416,3 +416,15 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 .drow .amt { text-align: left; font-weight: 700; line-height: 1.2; } .drow .amt small { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); }
 .drow .amt small.neg { color: var(--peach-d); } .drow .amt small.pos { color: var(--mint-d); }
 .drow.out { border-top: 1px dashed var(--line); border-radius: 0; color: var(--ink2); }
+/* undo toast: message, ↩ ביטול and a bar that shrinks while undo is possible */
+.toast.undo { display: flex; align-items: center; gap: 12px; pointer-events: auto; border-radius: var(--r-sm); padding: 8px 16px 12px; text-align: start; overflow: hidden; width: max-content; }
+.toast.undo .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast .undo-btn { flex: none; background: none; border: 0; color: var(--sky); font-weight: 700; padding: 8px 10px; min-height: 44px; border-radius: 10px; }
+.toast .undo-btn:hover { background: rgba(255,255,255,.08); }
+.toast .bar { position: absolute; inset-inline: 0; bottom: 0; height: 4px; background: var(--sky); transform-origin: right; animation: undo-bar linear forwards; }
+@keyframes undo-bar { to { transform: scaleX(0); } }
+.tx.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--sky); } to { box-shadow: 0 0 0 3px transparent; } }
+.trash-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
+.trash-row .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast.undo:not(.on) { pointer-events: none; } /* fades out in its own layout, never catches taps */

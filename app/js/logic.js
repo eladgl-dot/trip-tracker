@@ -391,3 +391,29 @@ export const mapsUrl = loc => `https://www.google.com/maps/search/?api=1&query=$
 export const shareMessage = (tripName, link, pin = '') =>
   `🧳 הוצאות הטיול "${tripName}"\n${link}` + (pin ? `\n🔑 סיסמה: ${pin}` : '');
 export const shareUrl = text => 'https://wa.me/?text=' + encodeURIComponent(text);
+
+// ---- Undo after delete, and the trip trash (deleted trips are kept 30 days, restorable by the manager)
+export const UNDO_MS = 8000;
+export const TRASH_DAYS = 30;
+const DAY_MS = 864e5;
+export const isDeleted = t => !!t?.deletedAt;
+export const trashDaysLeft = (t, now) => Math.max(0, Math.ceil((t.deletedAt + TRASH_DAYS * DAY_MS - now) / DAY_MS));
+export const trashExpired = (t, now) => isDeleted(t) && now - t.deletedAt >= TRASH_DAYS * DAY_MS;
+
+// Deletes that wait UNDO_MS before they really happen. undo(key) cancels one; flush() runs all now
+// (used when the page changes or the app is hidden, so a delete is never lost).
+export function pendingDeletes(ms = UNDO_MS, timers = { set: (f, t) => setTimeout(f, t), clear: id => clearTimeout(id) }) {
+  const map = new Map();
+  const finish = key => {
+    const p = map.get(key); if (!p) return;
+    timers.clear(p.timer); map.delete(key);
+    try { p.commit(); } catch (e) { console.error(e); }
+  };
+  return {
+    add(key, commit) { if (!map.has(key)) map.set(key, { commit, timer: timers.set(() => finish(key), ms) }); },
+    undo(key) { const p = map.get(key); if (!p) return false; timers.clear(p.timer); map.delete(key); return true; },
+    has: key => map.has(key),
+    flush() { [...map.keys()].forEach(finish); },
+    get size() { return map.size; },
+  };
+}

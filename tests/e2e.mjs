@@ -240,9 +240,20 @@ try {
   await page.click('.sheet [data-x]'); await page.waitForTimeout(250);
 
   // delete
+  const inStore = () => page.evaluate(() => JSON.stringify(JSON.parse(localStorage['tt-demo-db']).expenses).includes('רכבל לפסגה'));
+  const inList = async () => (await page.locator('#txList').textContent()).includes('רכבל לפסגה');
+  await page.locator('#txList .tx', { hasText: 'רכבל לפסגה' }).locator('[data-del]').click(); await page.waitForTimeout(200);
+  ok('delete: no confirm box', await page.locator('.dialog').count() === 0);
+  ok('delete hides row at once', !(await inList()));
+  ok('undo toast with ↩ ביטול', await page.locator('#toast.undo .undo-btn').isVisible() && (await toastText()).includes('נמחק'));
+  ok('expense kept until the undo time ends', await inStore());
+  await noHScroll('undo toast'); await shot('03c-undo-toast');
+  await page.click('#toast .undo-btn'); await page.waitForTimeout(300);
+  ok('undo brings the row back', await inList() && await inStore());
+  ok('undo: toast שוחזר', (await toastText()).includes('שוחזר') && await page.locator('#toast.undo').count() === 0);
   await page.locator('#txList .tx', { hasText: 'רכבל לפסגה' }).locator('[data-del]').click();
-  await page.click('.dialog [data-ok]'); await page.waitForTimeout(400);
-  ok('delete removes row', !(await page.locator('#txList').textContent()).includes('רכבל לפסגה'));
+  await page.waitForTimeout(8600);
+  ok('delete happens after 8 s', !(await inStore()) && !(await inList()) && !(await page.locator('#toast').getAttribute('class')).includes('on'));
 
   // settle
   await page.click('[data-tab=settle]');
@@ -382,8 +393,9 @@ try {
   await page.click('#x-save'); await page.waitForTimeout(400);
   ok('removing a photo updates count', (await row.textContent()).includes('📷 2'));
   ok('removed photo deleted from store', await page.evaluate(() => Object.values(JSON.parse(localStorage['tt-demo-db']).photos).flatMap(o => Object.values(o)).length === 2));
-  await row.locator('[data-del]').click(); await page.click('.dialog [data-ok]'); await page.waitForTimeout(400);
-  ok('deleting expense deletes its photos', await page.evaluate(() => Object.values(JSON.parse(localStorage['tt-demo-db']).photos).flatMap(o => Object.values(o)).length === 0));
+  await row.locator('[data-del]').click(); await page.evaluate(() => dispatchEvent(new Event('pagehide'))); await page.waitForTimeout(300);
+  ok('deleting expense deletes its photos (app hidden → delete runs now)', await page.evaluate(() => Object.values(JSON.parse(localStorage['tt-demo-db']).photos).flatMap(o => Object.values(o)).length === 0));
+  ok('app hidden → undo button goes away', !(await page.locator('#toast').getAttribute('class')).includes('on') && await page.evaluate(() => document.querySelector('#toast').inert));
   // permission denied → clear message, saving still works
   await ctx.clearPermissions();
   await page.click('#fab'); await page.waitForSelector('#x-geo');
@@ -493,8 +505,41 @@ try {
   await page.locator('input.code').pressSequentially('123456'); await page.click('.dialog button.primary'); await page.waitForTimeout(200);
   ok('delete: wrong admin code rejected', (await page.locator('.dialog .err').textContent()).includes('שגוי'));
   await page.fill('input.code', ''); await page.locator('input.code').pressSequentially('363636'); await page.click('.dialog button.primary');
-  await page.waitForSelector('.dialog [data-ok]'); await page.click('.dialog [data-ok]'); await page.waitForTimeout(400);
+  await page.waitForSelector('.dialog [data-ok]');
+  ok('trip confirm does not mention trash', !/סל|30/.test(await page.locator('.dialog:has([data-ok])').textContent()));
+  await page.click('.dialog [data-ok]'); await page.waitForTimeout(400);
   ok('trip deleted', await page.locator('.trip-card').count() === before - 1);
+  ok('trip undo toast says only נמחק', (await toastText()).includes('נמחק') && !/סל|30|שחזור/.test(await toastText()) && await page.locator('#toast .undo-btn').isVisible());
+  const eilat = await page.evaluate(() => Object.entries(JSON.parse(localStorage['tt-demo-db']).trips).find(([, t]) => t.name.includes('אילת')));
+  ok('deleted trip kept in the trash', !!eilat?.[1].deletedAt);
+  await page.click('#toast .undo-btn'); await page.waitForTimeout(300);
+  ok('trip undo brings it back', await page.locator('.trip-card').count() === before && await page.evaluate(id => !JSON.parse(localStorage['tt-demo-db']).trips[id].deletedAt, eilat[0]));
+  // delete again (admin session still open) → no undo → admin trash
+  await page.locator('.trip-card', { hasText: 'אילת' }).locator('.kebab').click();
+  await page.click('.menu [data-m=del]'); await page.waitForSelector('.dialog [data-ok]'); await page.click('.dialog [data-ok]'); await page.waitForTimeout(300);
+  ok('trip deleted again', await page.locator('.trip-card').count() === before - 1);
+  // old link → "הטיול נמחק"
+  await page.goto(BASE + '#/trip/' + eilat[0]); await page.waitForSelector('#restoreTrip', { timeout: 5000 }).catch(() => {});
+  ok('old link shows הטיול נמחק', (await page.locator('.wrap').textContent()).includes('הטיול נמחק'));
+  await noHScroll('deleted trip'); await shot('11-deleted-trip');
+  await page.goto(BASE + '#/admin'); await page.waitForSelector('#a-trash .trash-row', { timeout: 5000 }).catch(() => {});
+  ok('admin: trash card lists the trip', (await page.locator('#a-trash').textContent()).includes('אילת') && (await page.locator('#a-trash').textContent()).includes('עוד 30 ימים'));
+  await noHScroll('admin trash'); await shot('12-admin-trash');
+  await page.click('#a-trash [data-restore]'); await page.waitForTimeout(300);
+  ok('admin: restore', await page.locator('#a-trash-card').isHidden() && await page.evaluate(id => !JSON.parse(localStorage['tt-demo-db']).trips[id].deletedAt, eilat[0]));
+  // delete forever from the trash
+  await page.evaluate(id => { const d = JSON.parse(localStorage['tt-demo-db']); d.trips[id].deletedAt = Date.now(); localStorage['tt-demo-db'] = JSON.stringify(d); }, eilat[0]);
+  await page.reload(); await page.waitForSelector('#a-trash [data-purge]');
+  await page.click('#a-trash [data-purge]'); await page.waitForSelector('.dialog [data-ok]');
+  ok('delete forever asks first', (await page.locator('.dialog:has([data-ok])').textContent()).includes('לצמיתות'));
+  await page.click('.dialog [data-ok]'); await page.waitForTimeout(300);
+  ok('delete forever removes the trip and its expenses', await page.evaluate(id => { const d = JSON.parse(localStorage['tt-demo-db']); return !d.trips[id] && !d.expenses[id]; }, eilat[0]));
+  // a trip older than 30 days in the trash is removed when the home screen opens
+  const tuscany = await page.evaluate(() => { const d = JSON.parse(localStorage['tt-demo-db']), id = 'old-trash-trip';
+    d.trips[id] = { name: 'טיול ישן', participants: ['א'], defaultCurrency: 'ILS', deletedAt: Date.now() - 31 * 864e5 };
+    localStorage['tt-demo-db'] = JSON.stringify(d); return id; });
+  await page.goto(BASE + '#/'); await page.reload(); await page.waitForSelector('.trip-card'); await page.waitForTimeout(300);
+  ok('trash older than 30 days is purged', await page.evaluate(id => !JSON.parse(localStorage['tt-demo-db']).trips[id], tuscany));
   // new PIN works on Italy trip (access removed by admin change)
   await page.locator('.trip-card', { hasText: 'איטליה' }).click(); await page.fill('input.code', '9999'); await page.click('.dialog button.primary');
   await page.waitForSelector('#hero', { timeout: 5000 }).catch(() => {});

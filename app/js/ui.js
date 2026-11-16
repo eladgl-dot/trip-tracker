@@ -21,9 +21,25 @@ export const todayIso = () => {
 let toastTimer;
 export function toast(msg, kind = '') {
   const t = $('#toast');
-  t.textContent = msg; t.className = 'toast on ' + kind;
+  t.textContent = msg; t.className = 'toast on ' + kind; t.inert = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.className = 'toast', 3200);
+}
+// Toast with a "↩ ביטול" button and a bar that shrinks for `ms`. onUndo runs at most once.
+export function undoToast(msg, onUndo, ms) {
+  const t = $('#toast');
+  clearTimeout(toastTimer);
+  t.className = 'toast on undo'; t.inert = false;
+  t.innerHTML = `<span class="t"></span><button type="button" class="undo-btn">↩ ביטול</button><i class="bar" aria-hidden="true" style="animation-duration:${ms}ms"></i>`;
+  $('.t', t).textContent = msg;
+  let done = false;
+  $('.undo-btn', t).onclick = () => { if (done) return; done = true; t.className = 'toast'; onUndo(); };
+  toastTimer = setTimeout(() => { done = true; t.classList.remove('on'); t.inert = true; }, ms);
+}
+// Hides a still-open undo toast (on page change; its deletes are flushed then).
+export function hideUndoToast() {
+  const t = $('#toast');
+  if (t.classList.contains('undo') && t.classList.contains('on')) { clearTimeout(toastTimer); t.classList.remove('on'); t.inert = true; }
 }
 
 const openModals = new Set();

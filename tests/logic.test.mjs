@@ -400,3 +400,49 @@ test('budgetSummary: any amount over the budget is level "over"', () => {
   const b = L.budgetSummary(bTrip({ amount: 3239.99, per: 'trip' }), bDays, '2026-10-02');
   assert.ok(b.left < 0); assert.equal(b.level, 'over');
 });
+
+// ---- Step 23: undo + trip trash
+test('trash: deleted flag, days left, expiry after 30 days', () => {
+  const day = 864e5, at = Date.UTC(2026, 10, 1);
+  assert.equal(L.isDeleted({}), false);
+  assert.equal(L.isDeleted({ deletedAt: null }), false);
+  assert.equal(L.isDeleted({ deletedAt: at }), true);
+  assert.equal(L.trashDaysLeft({ deletedAt: at }, at), 30);
+  assert.equal(L.trashDaysLeft({ deletedAt: at }, at + 27.5 * day), 3);
+  assert.equal(L.trashDaysLeft({ deletedAt: at }, at + 40 * day), 0);
+  assert.equal(L.trashExpired({ deletedAt: at }, at + 30 * day - 1), false);
+  assert.equal(L.trashExpired({ deletedAt: at }, at + 30 * day), true);
+  assert.equal(L.trashExpired({}, at + 99 * day), false);
+});
+
+function fakeTimers() {
+  let n = 0; const map = new Map();
+  return { set: (fn, ms) => { map.set(++n, fn); return n; }, clear: id => map.delete(id), fire: () => { const fns = [...map.values()]; map.clear(); fns.forEach(f => f()); }, get count() { return map.size; } };
+}
+test('pending deletes: commit after time, undo cancels, flush commits all', () => {
+  const tm = fakeTimers(), done = [];
+  const p = L.pendingDeletes(8000, tm);
+  p.add('a', () => done.push('a'));
+  p.add('b', () => done.push('b'));
+  p.add('a', () => done.push('a2')); // same key twice is ignored
+  assert.ok(p.has('a') && p.has('b'));
+  assert.equal(p.undo('a'), true);
+  assert.equal(p.undo('a'), false);
+  assert.equal(p.has('a'), false);
+  tm.fire();
+  assert.deepEqual(done, ['b']);
+  assert.equal(p.size, 0);
+  p.add('c', () => done.push('c')); p.add('d', () => done.push('d'));
+  p.flush();
+  assert.deepEqual(done, ['b', 'c', 'd']);
+  assert.equal(tm.count, 0);
+  assert.equal(p.undo('c'), false); // too late
+});
+test('pending deletes: a failing commit does not stop the others', () => {
+  const tm = fakeTimers(), done = [];
+  const p = L.pendingDeletes(8000, tm);
+  p.add('x', () => { throw new Error('boom'); });
+  p.add('y', () => done.push('y'));
+  p.flush();
+  assert.deepEqual(done, ['y']);
+});

@@ -1,7 +1,7 @@
 // TripTracker – screens and routing. Routes: #/ home · #/new · #/trip/<id> · #/admin
 import { store } from './store.js';
 import * as L from './logic.js';
-import { esc, $, $$, toast, modal, confirmBox, codePrompt, reportError, formatDate, dateRange, todayIso, closeAll } from './ui.js';
+import { esc, $, $$, toast, modal, confirmBox, codePrompt, reportError, formatDate, dateRange, todayIso, closeAll, undoToast, hideUndoToast } from './ui.js';
 import { breakdown, bars } from './charts.js';
 import { hashPin, checkPin, hashAdmin } from './pin.js';
 import { getRate, prefetchRates } from './rates.js';
@@ -52,6 +52,17 @@ const GROUP_NAMES = { year: 'לפי שנה', tag: 'לפי תגית', none: 'בל
 const go = hash => { if (location.hash === hash) route(); else location.hash = hash; };
 // Writes resolve only after the server confirms; offline they are queued, so never block the UI on them.
 const fire = p => Promise.resolve(p).catch(reportError);
+// Expense deletes wait L.UNDO_MS so "↩ ביטול" can cancel them. Whatever still waits runs when the page changes or the app is hidden.
+const pending = L.pendingDeletes();
+const flushNow = () => { if (pending.size) { pending.flush(); hideUndoToast(); } };
+addEventListener('pagehide', flushNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
+// Trips in the trash longer than L.TRASH_DAYS are deleted for good by the first phone that sees them.
+const purged = new Set();
+function purgeExpired(trips) {
+  const now = Date.now();
+  for (const t of trips) if (L.trashExpired(t, now) && !purged.has(t.id)) { purged.add(t.id); store.deleteTrip(t.id).catch(() => purged.delete(t.id)); }
+}
 
 // ---------------------------------------------------------------- boot
 banners();
@@ -95,6 +106,7 @@ function banners() {
 function route() {
   cleanups.forEach(fn => fn()); cleanups = [];
   closeAll();
+  pending.flush(); hideUndoToast();
   window.scrollTo(0, 0);
   const h = location.hash.replace(/^#\/?/, '');
   const [page, id, sub] = h.split('/');
@@ -163,6 +175,7 @@ const HELP_STEPS = [
   ['מתחשבנים', 'בלשונית "התחשבנות" רואים מי מעביר כמה למי.']
 ];
 const HELP_MORE = [
+  ['↩️', 'ביטול מחיקה', `מחקתם תנועה או טיול בטעות? יש ${L.UNDO_MS / 1000} שניות ללחוץ "↩ ביטול" בהודעה שלמטה.`],
   ['💰', 'תקציב', '✏️ בפרטי הטיול: תקציב לכל הטיול או ליום (לא חובה). המשבצת "תקציב" מראה כמה נשאר; לחיצה – פירוט וחלוקה לפי יום.'],
   ['⭐', 'הטיולים שלי', 'במסך הראשי רואים רק טיולים שיצרתם או פתחתם עם הסיסמה. טיולים של אחרים ב"כל הטיולים" – בלי סכומים ובלי שמות.'],
   ['🏷️', 'תגיות, חיפוש וקיבוץ', '⋮ על טיול ← "תגיות" (משפחה, חברים, עבודה…). לחיצה על תגית מסננת; "קיבוץ" מסדר לפי שנה או תגית; 🔍 מחפש שם, מקום או תגית.'],
@@ -370,7 +383,8 @@ function homePage() {
   $('#tripSearch').oninput = e => { st.query = e.target.value; draw(); };
 
   cleanups.push(store.onTrips(trips => {
-    st.trips = trips.map(t => ({ ...t, tags: L.normTags(t.tags) }));
+    purgeExpired(trips);
+    st.trips = trips.filter(t => !L.isDeleted(t)).map(t => ({ ...t, tags: L.normTags(t.tags) }));
     draw();
   }, err => { host.innerHTML = `<div class="empty"><div class="big">🔒</div><p>אין גישה לנתונים.</p></div>`; reportError(err); }));
 }
@@ -435,9 +449,11 @@ async function adminCode(title) {
 
 async function deleteTripFlow(trip) {
   if (!await adminCode('🗑️ מחיקת טיול')) return;
-  const ok = await confirmBox('מחיקת טיול', `למחוק לצמיתות את "${trip.name}" וכל התנועות שלו? אי אפשר לבטל.`, { ok: 'מחיקה סופית', danger: true });
+  const ok = await confirmBox('מחיקת טיול', `למחוק את "${trip.name}" וכל התנועות שלו?`, { ok: 'מחיקה', danger: true });
   if (!ok) return;
-  fire(store.deleteTrip(trip.id)).then(() => toast('הטיול נמחק'));
+  // Soft delete: hidden everywhere, restorable from the admin panel for L.TRASH_DAYS days (the user just sees "נמחק").
+  fire(store.updateTrip(trip.id, { deletedAt: Date.now() }));
+  undoToast(`נמחק: ${trip.name}`, () => { fire(store.updateTrip(trip.id, { deletedAt: null })); toast('שוחזר', 'good'); }, L.UNDO_MS);
 }
 
 async function askAdmin() {
@@ -575,12 +591,28 @@ async function tripPage(id) {
     const t = await store.getTrip(id).catch(() => null);
     if (!here()) return;
     if (!t) { toast('הטיול לא נמצא', 'bad'); return go('#/'); }
+    if (L.isDeleted(t)) return deletedTripScreen(t, true);
     const ok = await unlock(t);
     if (!here()) return;
     if (!ok) return go('#/');
   }
-  const st = { trip: null, expenses: [], tab: 'list', search: '', chart: day ? 'day' : 'cat', focus: day ? { kind: 'day', name: day } : null, who: '', built: false };
+  const st = { trip: null, all: [], expenses: [], gone: false, tab: 'list', search: '', chart: day ? 'day' : 'cat', focus: day ? { kind: 'day', name: day } : null, who: '', built: false };
   const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
+  // Expenses waiting to be deleted (undo still possible) are hidden from every view.
+  const hideKey = eid => id + ':' + eid;
+  const showList = () => { st.expenses = st.all.filter(x => !pending.has(hideKey(x.id))); };
+  st.del = e => {
+    if (!e) return;
+    const k = hideKey(e.id);
+    pending.flush(); // the previous toast (and its undo) is replaced
+    pending.add(k, () => fire(store.deleteExpense(id, e.id, e.photoIds)));
+    showList(); drawAll();
+    undoToast(`נמחק: ${e.details}`, () => {
+      if (!pending.undo(k)) return;
+      showList(); drawAll(); toast('שוחזר', 'good');
+      $(`[data-edit="${CSS.escape(e.id)}"]`)?.closest('.tx')?.classList.add('flash');
+    }, L.UNDO_MS);
+  };
 
   const build = () => {
     view.innerHTML = `
@@ -778,12 +810,7 @@ async function tripPage(id) {
       const ok = pics.map(p => p.data).filter(L.isPhotoData);
       if (ok.length) photoViewer(ok, 0); else toast('התמונות עדיין לא סונכרנו למכשיר הזה');
     });
-    $$('[data-del]', host).forEach(b => b.onclick = async () => {
-      const e = st.expenses.find(x => x.id === b.dataset.del);
-      if (await confirmBox('מחיקת תנועה', `למחוק את "${e.details}"?`, { ok: 'מחיקה', danger: true })) {
-        fire(store.deleteExpense(st.trip.id, e.id, e.photoIds)); toast('נמחק');
-      }
-    });
+    $$('[data-del]', host).forEach(b => b.onclick = () => st.del(st.expenses.find(x => x.id === b.dataset.del)));
   };
 
   const drawSettle = () => {
@@ -836,7 +863,7 @@ async function tripPage(id) {
   };
 
   const drawAll = () => {
-    if (!st.trip) return;
+    if (!st.trip || st.gone) return;
     if (!st.built) build();
     drawHero(); drawTabs(); drawStats(); drawChart(); drawList(); drawSettle();
   };
@@ -844,15 +871,30 @@ async function tripPage(id) {
   let gotExpenses = false;
   cleanups.push(store.onTrip(id, trip => {
     if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
+    if (L.isDeleted(trip)) { st.gone = true; return deletedTripScreen(trip); }
+    if (st.gone) return route(); // restored meanwhile: start the page fresh
     st.trip = trip; if (gotExpenses) drawAll();
     prefetchRates(trip.defaultCurrency); // keep rates on the phone for offline (at most every 6 h)
   }, reportError));
   const onOnline = () => st.trip && prefetchRates(st.trip.defaultCurrency);
   addEventListener('online', onOnline); cleanups.push(() => removeEventListener('online', onOnline));
   cleanups.push(store.onExpenses(id, list => {
-    st.expenses = list; gotExpenses = true; drawAll();
-    fillAddresses(id, list, (tid, eid, patch) => fire(store.patchExpense(tid, eid, patch)));
+    st.all = list; showList(); gotExpenses = true; drawAll();
+    fillAddresses(id, st.expenses, (tid, eid, patch) => fire(store.patchExpense(tid, eid, patch)));
   }, reportError));
+}
+
+// A trip in the trash. Others just see "נמחק"; the manager can bring it back.
+function deletedTripScreen(t, reload = false) {
+  closeAll();
+  view.innerHTML = `<header class="topbar"><a class="icon-btn" href="#/" title="חזרה" aria-label="חזרה">→</a><h1>טיול</h1></header>
+    <div class="wrap"><div class="card empty"><div class="big" aria-hidden="true">🗑️</div><h2>הטיול נמחק</h2>
+      <button class="btn ghost" id="restoreTrip">↩ שחזור (מנהל)</button></div></div>`;
+  $('#restoreTrip').onclick = async () => {
+    if (!await adminCode('↩ שחזור טיול')) return;
+    fire(store.updateTrip(t.id, { deletedAt: null })); toast('הטיול שוחזר', 'good');
+    if (reload && location.hash.startsWith('#/trip/')) route(); // otherwise the trip listener restarts the page
+  };
 }
 
 // ---------------------------------------------------------------- budget screen (#/trip/<id>/budget)
@@ -955,6 +997,7 @@ async function budgetPage(id) {
   };
   cleanups.push(store.onTrip(id, trip => {
     if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
+    if (L.isDeleted(trip)) return go('#/trip/' + encodeURIComponent(id)); // the trip page shows "הטיול נמחק"
     st.trip = trip; gotT = true; draw();
   }, reportError));
   cleanups.push(store.onExpenses(id, list => { st.expenses = list; gotE = true; draw(); }, reportError));
@@ -1263,11 +1306,7 @@ function expenseSheet(st, existing, type = 'expense') {
   // ---- save / delete
   $('[data-x]', el).onclick = () => m.close();
   const del = $('[data-del]', el);
-  if (del) del.onclick = async () => {
-    if (await confirmBox('מחיקת תנועה', `למחוק את "${existing.details}"?`, { ok: 'מחיקה', danger: true })) {
-      fire(store.deleteExpense(t.id, existing.id, existing.photoIds)); m.close(); toast('נמחק');
-    }
-  };
+  if (del) del.onclick = () => { m.close(); st.del(existing); };
   $('form', el).onsubmit = async ev => {
     ev.preventDefault();
     if (r.loading) return toast('רגע, טוען שער…');
@@ -1325,6 +1364,8 @@ function adminPage() {
     <header class="topbar"><a class="icon-btn" href="#/" title="חזרה" aria-label="חזרה">→</a><h1>⚙️ ניהול</h1>
       <button class="icon-btn" id="logout" title="יציאה מהניהול" aria-label="יציאה מהניהול">🚪</button></header>
     <div class="wrap">
+      <div class="card" id="a-trash-card" hidden><h2>🗑️ טיולים שנמחקו</h2><div id="a-trash"></div>
+        <p class="muted">אחרי ${L.TRASH_DAYS} יום הטיול נמחק לצמיתות.</p></div>
       <div class="card"><h2>🔑 שינוי סיסמת טיול</h2>
         <div class="field"><label class="lbl" for="a-trip">טיול</label><select id="a-trip"></select></div>
         <form class="row2" id="a-pin-form" novalidate><input id="a-pin" class="num" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="4 ספרות חדשות" style="text-align:center;letter-spacing:6px" aria-label="סיסמה חדשה">
@@ -1335,8 +1376,26 @@ function adminPage() {
         <p class="muted">שינוי שם מעדכן את כל התנועות בכל הטיולים. מחיקה מעבירה אותן ל"${L.UNCATEGORIZED}".</p></div>
     </div>`;
   $('#logout').onclick = () => { sessionStorage.removeItem('tt-admin'); go('#/'); };
+  $('#a-trash').onclick = async ev => {
+    const r = ev.target.closest('[data-restore]'), p = ev.target.closest('[data-purge]');
+    if (r) { fire(store.updateTrip(r.dataset.restore, { deletedAt: null })); toast('הטיול שוחזר', 'good'); }
+    const t = p && gone.find(x => x.id === p.dataset.purge);
+    if (t && await confirmBox('מחיקה לצמיתות', `למחוק לצמיתות את "${t.name}" וכל התנועות שלו? אי אפשר לבטל.`, { ok: 'מחיקה לצמיתות', danger: true }))
+      fire(store.deleteTrip(t.id)).then(() => toast('נמחק לצמיתות'));
+  };
 
-  cleanups.push(store.onTrips(trips => {
+  let gone = [];
+  cleanups.push(store.onTrips(all => {
+    purgeExpired(all);
+    const now = Date.now(), trips = all.filter(t => !L.isDeleted(t));
+    gone = all.filter(t => L.isDeleted(t) && !L.trashExpired(t, now)).sort((a, b) => b.deletedAt - a.deletedAt);
+    $('#a-trash-card').hidden = !gone.length;
+    $('#a-trash').innerHTML = gone.map(t => {
+      const n = L.trashDaysLeft(t, now), when = new Date(t.deletedAt).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
+      return `<div class="trash-row"><span class="t"><b>${esc(t.name)}</b><br><span class="muted">נמחק ${esc(when)} · ${n > 1 ? `עוד ${n} ימים` : 'יימחק מחר'}</span></span>
+        <button class="btn ghost sm" data-restore="${esc(t.id)}">↩ שחזור</button>
+        <button class="mini del" data-purge="${esc(t.id)}" title="מחיקה לצמיתות" aria-label="מחיקה לצמיתות של ${esc(t.name)}">✕</button></div>`;
+    }).join('');
     const sel = $('#a-trip'), keep = sel.value;
     trips.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
     sel.innerHTML = trips.length ? trips.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('') : '<option value="">אין טיולים</option>';
