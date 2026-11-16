@@ -329,3 +329,74 @@ test('groupTrips by tag with a tag filter: trips go under the filtered tag', () 
   const g = L.groupTrips(ts, 'tag', 'עבודה');
   assert.equal(g.length, 1); assert.equal(g[0].label, 'עבודה'); assert.equal(g[0].trips.length, 2);
 });
+
+// ---------- budget (Step 22) ----------
+const bTrip = (budget, extra = {}) => ({ participants: ['א', 'ב'], startDate: '2026-09-27', endDate: '2026-10-05', budget, ...extra });
+const bDays = [['2026-09-27', 480], ['2026-09-28', 610], ['2026-09-29', 395], ['2026-09-30', 720], ['2026-10-01', 505], ['2026-10-02', 530]]
+  .map(([date, v]) => ex('א', v, { date }));
+
+test('budgetSummary: none when no budget or zero', () => {
+  assert.equal(L.budgetSummary(bTrip(undefined), bDays, '2026-10-02'), null);
+  assert.equal(L.budgetSummary(bTrip({ amount: 0, per: 'trip' }), bDays, '2026-10-02'), null);
+});
+test('budgetSummary: mid-trip numbers (mockup example)', () => {
+  const b = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), bDays, '2026-10-02');
+  assert.equal(b.total, 4500); assert.equal(b.daily, 500); assert.equal(b.tripDays, 9);
+  assert.equal(b.spent, 3240); assert.equal(b.left, 1260);
+  assert.equal(b.elapsed, 6); assert.equal(b.daysLeft, 3);
+  assert.equal(b.allowedPerDay, 420); assert.equal(b.avgPerDay, 540); assert.equal(b.projection, 4860);
+  assert.equal(b.pct, 0.72); assert.ok(Math.abs(b.expectedPct - 6 / 9) < 1e-9); assert.equal(b.level, 'ok');
+  assert.equal(b.days.length, 9);
+  assert.deepEqual(b.days[1], { date: '2026-09-28', spent: 610, diff: 110, future: false, today: false });
+  assert.equal(b.days[5].today, true);
+  assert.deepEqual(b.days[6], { date: '2026-10-03', spent: 0, diff: 0, future: true, today: false, allowed: 420 });
+});
+test('budgetSummary: per-day amount × trip days', () => {
+  assert.equal(L.budgetSummary(bTrip({ amount: 500, per: 'day' }), bDays, '2026-10-02').total, 4500);
+});
+test('budgetSummary: refunds lower what is spent (net)', () => {
+  const b = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), [...bDays, { ...inc('א', 240), date: '2026-10-01' }], '2026-10-02');
+  assert.equal(b.spent, 3000); assert.equal(b.days[4].spent, 265);
+});
+test('budgetSummary: levels ok / warn (80%+) / over', () => {
+  const lvl = amt => L.budgetSummary(bTrip({ amount: amt, per: 'trip' }), bDays, '2026-10-02').level;
+  assert.equal(lvl(4500), 'ok'); assert.equal(lvl(4050), 'warn'); assert.equal(lvl(3000), 'over');
+  const o = L.budgetSummary(bTrip({ amount: 3000, per: 'trip' }), bDays, '2026-10-02');
+  assert.equal(o.left, -240); assert.equal(o.allowedPerDay, 0);
+});
+test('budgetSummary: before and after the trip', () => {
+  const pre = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), [], '2026-09-01');
+  assert.equal(pre.elapsed, 0); assert.equal(pre.allowedPerDay, 500); assert.equal(pre.projection, null); assert.equal(pre.avgPerDay, null);
+  const post = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), bDays, '2026-11-01');
+  assert.equal(post.elapsed, 9); assert.equal(post.daysLeft, 0); assert.equal(post.allowedPerDay, null); assert.equal(post.projection, null);
+  assert.equal(post.avgPerDay, 360); assert.ok(post.days.every(d => !d.future));
+});
+test('budgetSummary: trip without dates → total only', () => {
+  const b = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }, { startDate: '', endDate: '' }), bDays, '2026-10-02');
+  assert.equal(b.left, 1260); assert.equal(b.tripDays, null); assert.equal(b.daily, null);
+  assert.deepEqual(b.days, []); assert.equal(b.allowedPerDay, null); assert.equal(b.expectedPct, null);
+});
+test('validateTrip: budget must be a positive number; per day needs dates', () => {
+  assert.deepEqual(L.validateTrip({ ...bTrip({ amount: 500, per: 'day' }), name: 'x', location: 'y', defaultCurrency: 'EUR' }), {});
+  assert.ok(L.validateTrip({ ...bTrip({ amount: 500, per: 'day' }, { startDate: '', endDate: '' }), name: 'x', location: 'y', defaultCurrency: 'EUR' }).budget);
+  assert.ok(L.validateTrip({ ...bTrip({ amount: -5, per: 'trip' }), name: 'x', location: 'y', defaultCurrency: 'EUR' }).budget);
+});
+test('budgetSummary: expenses outside the trip dates are shown apart and not in the daily average', () => {
+  const list = [...bDays, ex('א', 300, { date: '2026-09-01' }), ex('א', 100, { date: '' })];
+  const b = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), list, '2026-10-02');
+  assert.equal(b.spent, 3640); assert.equal(b.outside, 400);
+  assert.equal(b.avgPerDay, 540); assert.equal(b.projection, 5260); // 540 × 9 + 400 outside
+  assert.equal(L.round2(b.days.reduce((s, d) => s + d.spent, 0) + b.outside), b.spent);
+});
+test('budgetSummary: future-dated expense inside the trip is not in the average so far', () => {
+  const b = L.budgetSummary(bTrip({ amount: 4500, per: 'trip' }), [...bDays, ex('א', 900, { date: '2026-10-04' })], '2026-10-02');
+  assert.equal(b.avgPerDay, 540); assert.equal(b.projection, 5760); assert.equal(b.outside, 0);
+});
+test('budgetSummary: refunds bigger than expenses → pct never below 0', () => {
+  const b = L.budgetSummary(bTrip({ amount: 1000, per: 'trip' }), [{ ...inc('א', 200), date: '2026-09-28' }], '2026-10-02');
+  assert.equal(b.spent, -200); assert.equal(b.pct, 0); assert.equal(b.level, 'ok');
+});
+test('budgetSummary: any amount over the budget is level "over"', () => {
+  const b = L.budgetSummary(bTrip({ amount: 3239.99, per: 'trip' }), bDays, '2026-10-02');
+  assert.ok(b.left < 0); assert.equal(b.level, 'over');
+});

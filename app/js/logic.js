@@ -198,6 +198,44 @@ export const TRIP_COLORS = [
 ];
 export const tripColor = key => TRIP_COLORS.find(c => c.key === key) || TRIP_COLORS[0];
 
+// ---------- budget ----------
+// trip.budget = { amount, per: 'trip' | 'day' } in the trip currency. Compared with the net spend (expenses − refunds).
+const addDays = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
+export function budgetSummary(trip, expenses, today = new Date().toISOString().slice(0, 10)) {
+  const b = trip.budget;
+  if (!b || !(b.amount > 0)) return null;
+  const dated = !!(trip.startDate && trip.endDate && trip.endDate >= trip.startDate);
+  const tripDays = dated ? daysBetween(trip.startDate, trip.endDate) : null;
+  const total = round2(b.per === 'day' && tripDays ? b.amount * tripDays : b.amount);
+  let spent = 0; const perDate = new Map();
+  for (const e of expenses) {
+    const v = e.type === 'income' ? -e.convertedAmount : e.convertedAmount;
+    spent += v; if (e.date) perDate.set(e.date, (perDate.get(e.date) || 0) + v);
+  }
+  spent = round2(spent);
+  const left = round2(total - spent);
+  const pct = Math.max(0, Math.round(spent / total * 10000) / 10000); // refunds bigger than expenses → 0%, not negative
+  const level = left < 0 ? 'over' : pct >= 0.8 ? 'warn' : 'ok';
+  const base = { total, spent, left, pct, level, tripDays, daily: null, elapsed: null, daysLeft: null, expectedPct: null, allowedPerDay: null, avgPerDay: null, projection: null, outside: 0, days: [] };
+  if (!dated) return base;
+  const elapsed = today < trip.startDate ? 0 : today > trip.endDate ? tripDays : daysBetween(trip.startDate, today);
+  const daysLeft = tripDays - elapsed;
+  const daily = round2(total / tripDays);
+  const allowedPerDay = daysLeft > 0 ? round2(Math.max(left, 0) / daysLeft) : null;
+  // Average so far = only days of the trip up to today. Expenses outside the trip dates (or undated) are shown apart.
+  let soFar = 0, inTrip = 0;
+  for (const [date, v] of perDate) if (date >= trip.startDate && date <= trip.endDate) { inTrip += v; if (date <= today) soFar += v; }
+  const outside = round2(spent - inTrip);
+  const avgPerDay = elapsed > 0 ? round2(soFar / elapsed) : null;
+  const projection = elapsed > 0 && daysLeft > 0 ? round2(soFar / elapsed * tripDays + spent - soFar) : null;
+  const days = [];
+  for (let i = 0; i < tripDays; i++) {
+    const date = addDays(trip.startDate, i), s = round2(perDate.get(date) || 0), future = date > today;
+    days.push({ date, spent: s, diff: future ? 0 : round2(s - daily), future, today: date === today, ...(future ? { allowed: allowedPerDay } : {}) });
+  }
+  return { ...base, outside, daily, elapsed, daysLeft, expectedPct: elapsed / tripDays, allowedPerDay, avgPerDay, projection, days };
+}
+
 // ---------- home: tags, search, grouping ----------
 export const MAX_TAGS = 10;
 export const NO_DATE = 'ללא תאריך';
@@ -288,6 +326,10 @@ export function validateTrip(t) {
   if (!t.participants?.length) errors.participants = 'יש להוסיף לפחות משתתף אחד';
   if (t.startDate && t.endDate && t.endDate < t.startDate) errors.endDate = 'תאריך הסיום לפני תאריך ההתחלה';
   if ('pin' in t && !isPin4(t.pin || '')) errors.pin = 'סיסמה של 4 ספרות בדיוק';
+  if (t.budget) {
+    if (!(t.budget.amount > 0) || !Number.isFinite(t.budget.amount)) errors.budget = 'תקציב צריך להיות מספר גדול מ-0 (או להשאיר ריק)';
+    else if (t.budget.per === 'day' && !(t.startDate && t.endDate)) errors.budget = 'תקציב ליום צריך תאריכי התחלה וסיום';
+  }
   return errors;
 }
 

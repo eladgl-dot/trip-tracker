@@ -299,6 +299,32 @@ try {
   const heroStyle = await page.locator('#hero').getAttribute('style');
   ok('trip color applied', /D1FAE5|209, 250, 229/i.test(heroStyle), heroStyle);
 
+  // budget (Step 22)
+  ok('no budget → no budget tile', await page.locator('#stats .btile').count() === 0);
+  await page.click('#hero [data-edit-trip]'); await page.waitForSelector('#f-bud');
+  await page.fill('#f-bud', 'abc'); await page.click('.sheet button.primary'); await page.waitForTimeout(200);
+  ok('budget: bad amount shows error', (await page.locator('[data-f=budget] .err').textContent()).includes('תקציב'));
+  await page.fill('#f-bud', '2000');
+  ok('budget hint: per day for the whole trip', /ליום · 9 ימים/.test(await page.locator('#f-bud-hint').textContent()));
+  await page.click('[data-per=day]');
+  ok('budget hint: per-day switch shows the trip total', (await page.locator('#f-bud-hint').textContent()).includes('לכל הטיול'));
+  await page.click('[data-per=trip]');
+  await shot('12a-budget-form'); await page.click('.sheet button.primary'); await page.waitForTimeout(400);
+  await page.click('[data-tab=list]'); await page.evaluate(() => scrollTo(0, 0));
+  const tile = page.locator('#stats .btile');
+  ok('budget tile shows left of total', await tile.count() === 1 && (await tile.textContent()).includes('2,000') && /נשארו|מעל התקציב/.test(await tile.textContent()));
+  await noHScroll('budget tile'); await shot('12b-budget-tile');
+  await tile.click(); await page.waitForSelector('.bhead');
+  ok('budget screen: ring, spent, back link', await page.locator('.ring').count() === 1 && (await page.locator('.b-kv').textContent()).includes('הוצאנו') && await page.locator('.bhead a[href$="' + page.url().split('#/trip/')[1].replace('/budget', '') + '"]').count() === 1);
+  await noHScroll('budget total'); await shot('12c-budget-total');
+  await page.click('[data-bmode=day]');
+  ok('budget per day: a row per trip day', await page.locator('.drow').count() === 9);
+  await noHScroll('budget per day'); await shot('12d-budget-days');
+  const dayWithSpend = page.locator('.drow:not([disabled])').filter({ has: page.locator('.amt small.neg') }).first();
+  await dayWithSpend.click(); await page.waitForSelector('#hero');
+  ok('tap a day → trip page with that day first', await page.locator('#txList .focus-pill').count() === 1 && (await page.locator('#txList .focus-sep').textContent()).includes('לא ביום הנבחר'));
+  await page.click('#txList [data-unfocus]');
+
   // currency change EUR -> ILS
   await page.click('#hero [data-edit-trip]'); await page.waitForSelector('#f-cur');
   await page.selectOption('#f-cur', 'ILS'); await page.click('.sheet button.primary');
@@ -308,6 +334,8 @@ try {
   await page.click('[data-tab=list]');
   const net3 = await page.locator('#stats .stat.big .money').textContent();
   ok('currency switched to ILS and amounts converted', net3.includes('₪') && !net3.includes('1,630.20'), net3);
+  const bOf = await page.locator('#stats .btile .b-of').textContent();
+  ok('currency change converts the budget too', bOf.includes('₪') && !bOf.includes('2,000.00'), bOf);
 
   // print
   await page.evaluate(() => { window.print = () => {}; });

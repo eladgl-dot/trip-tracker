@@ -97,8 +97,9 @@ function route() {
   closeAll();
   window.scrollTo(0, 0);
   const h = location.hash.replace(/^#\/?/, '');
-  const [page, id] = h.split('/');
+  const [page, id, sub] = h.split('/');
   if (page === 'new') return createTripPage();
+  if (page === 'trip' && id && sub === 'budget') return budgetPage(id);
   if (page === 'trip' && id) return tripPage(id);
   if (page === 'admin') return isAdmin() ? adminPage() : (go('#/'), askAdmin());
   homePage();
@@ -162,6 +163,7 @@ const HELP_STEPS = [
   ['מתחשבנים', 'בלשונית "התחשבנות" רואים מי מעביר כמה למי.']
 ];
 const HELP_MORE = [
+  ['💰', 'תקציב', '✏️ בפרטי הטיול: תקציב לכל הטיול או ליום (לא חובה). המשבצת "תקציב" מראה כמה נשאר; לחיצה – פירוט וחלוקה לפי יום.'],
   ['⭐', 'הטיולים שלי', 'במסך הראשי רואים רק טיולים שיצרתם או פתחתם עם הסיסמה. טיולים של אחרים ב"כל הטיולים" – בלי סכומים ובלי שמות.'],
   ['🏷️', 'תגיות, חיפוש וקיבוץ', '⋮ על טיול ← "תגיות" (משפחה, חברים, עבודה…). לחיצה על תגית מסננת; "קיבוץ" מסדר לפי שנה או תגית; 🔍 מחפש שם, מקום או תגית.'],
   ['📊', 'לאן הלך הכסף', '"פילוח" לפי קטגוריה או לפי יום, וממוצע ליום ולאדם. לחיצה על שורה מביאה את ההוצאות שלה לראש הרשימה.'],
@@ -457,6 +459,10 @@ function tripFormHtml(t, withPin) {
       <p class="err" style="grid-column:1/-1"></p>
     </div>
     <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">מטבע ברירת מחדל *</label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
+    <div class="field" data-f="budget"><label class="lbl" for="f-bud">💰 תקציב <span class="small">(לא חובה)</span></label>
+      <div class="toggle" role="group" aria-label="סוג התקציב" id="f-bud-per"><button type="button" data-per="trip" aria-pressed="${t.budget?.per !== 'day'}">לכל הטיול</button><button type="button" data-per="day" aria-pressed="${t.budget?.per === 'day'}">ליום</button></div>
+      <div class="chip-input bud-in"><input id="f-bud" class="num" inputmode="decimal" autocomplete="off" placeholder="ריק = בלי תקציב" value="${t.budget?.amount ?? ''}"><span class="chip mint" id="f-bud-cur"></span></div>
+      <p class="muted small" id="f-bud-hint"></p><p class="err"></p></div>
     <div class="field"><span class="lbl" id="f-color-l">צבע הטיול</span>
       <div class="swatches" id="f-color" role="radiogroup" aria-labelledby="f-color-l">${L.TRIP_COLORS.map(c => `<button type="button" role="radio" class="sw"
         data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${c.name}" title="${c.name}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
@@ -500,16 +506,34 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     $$('[data-color]', root).forEach(x => x.setAttribute('aria-checked', x === b));
   });
   const readTags = bindTagPicker(root, t.tags);
+  // budget: amount + "for the whole trip / per day"; the hint shows the other number
+  let per = t.budget?.per === 'day' ? 'day' : 'trip', budTouched = false;
+  const budHint = () => {
+    const cur = $('#f-cur', root).value, a = L.parseAmount($('#f-bud', root).value);
+    const s = $('#f-start', root).value, e = $('#f-end', root).value;
+    const days = s && e && e >= s ? L.daysBetween(s, e) : 0;
+    $('#f-bud-cur', root).textContent = `${L.currencySymbol(cur)} ${cur}`;
+    $$('[data-per]', root).forEach(x => x.setAttribute('aria-pressed', x.dataset.per === per));
+    const f = v => L.formatMoney(v, cur);
+    $('#f-bud-hint', root).textContent = !(a > 0) ? '' : !days ? (per === 'day' ? 'תקציב ליום צריך תאריכי התחלה וסיום' : '')
+      : per === 'trip' ? `= ${f(L.round2(a / days))} ליום · ${days} ימים` : `= ${f(L.round2(a * days))} לכל הטיול · ${days} ימים`;
+  };
+  $$('[data-per]', root).forEach(x => x.onclick = () => { per = x.dataset.per; budTouched = true; budHint(); });
+  $('#f-bud', root).addEventListener('input', () => { budTouched = true; });
+  ['#f-bud', '#f-start', '#f-end', '#f-cur'].forEach(sel => $(sel, root).addEventListener('input', budHint));
+  $('#f-cur', root).addEventListener('change', budHint);
+  budHint();
   const pin = $('#f-pin', root);
   if (pin) pin.addEventListener('input', () => pin.value = pin.value.replace(/\D/g, '').slice(0, 4));
   draw();
 
-  return function read() {
+  const read = function () {
     if (input.value.trim()) add(); // a typed name that wasn't added yet still counts
     const data = {
       name: $('#f-name', root).value.trim(), location: $('#f-loc', root).value.trim(),
       startDate: $('#f-start', root).value, endDate: $('#f-end', root).value,
-      defaultCurrency: $('#f-cur', root).value, participants: [...people], color, tags: readTags()
+      defaultCurrency: $('#f-cur', root).value, participants: [...people], color, tags: readTags(),
+      budget: $('#f-bud', root).value.trim() ? { amount: L.round2(L.parseAmount($('#f-bud', root).value)), per } : null
     };
     if (pin) data.pin = pin.value;
     const errors = L.validateTrip(data);
@@ -518,6 +542,8 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     if (first) { first.focus(); return null; }
     return data;
   };
+  read.budgetTouched = () => budTouched;
+  return read;
 }
 
 function createTripPage() {
@@ -542,6 +568,7 @@ function createTripPage() {
 
 // ---------------------------------------------------------------- trip page
 async function tripPage(id) {
+  let day = null; try { day = sessionStorage.getItem('tt-focus-day:' + id); sessionStorage.removeItem('tt-focus-day:' + id); } catch {} // tap on a day in the budget screen
   view.innerHTML = `<div class="wrap" style="padding-top:40px"><div class="skeleton"></div></div>`;
   if (accessLeft(id) <= 0) {
     const here = () => location.hash === '#/trip/' + id; // the user may have navigated away meanwhile
@@ -552,7 +579,7 @@ async function tripPage(id) {
     if (!here()) return;
     if (!ok) return go('#/');
   }
-  const st = { trip: null, expenses: [], tab: 'list', search: '', chart: 'cat', focus: null, who: '', built: false };
+  const st = { trip: null, expenses: [], tab: 'list', search: '', chart: day ? 'day' : 'cat', focus: day ? { kind: 'day', name: day } : null, who: '', built: false };
   const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
 
   const build = () => {
@@ -668,6 +695,7 @@ async function tripPage(id) {
     $('#stats').innerHTML = `
       <div class="card stat big"><div><div class="muted">מאזן נטו (הוצאות פחות החזרים)</div><div class="v"><span class="money">${fmt(s.net)}</span></div></div>
         <span class="chip sky">${s.days} ימים · ${st.expenses.length} תנועות</span></div>
+      ${(b => b ? budgetTile(st.trip, b, fmt) : '')(L.budgetSummary(st.trip, st.expenses, todayIso()))}
       <div class="card stat exp"><div class="muted">סה"כ הוצאות</div><div class="v neg"><span class="money">${fmt(s.totalExpenses)}</span></div></div>
       <div class="card stat inc"><div class="muted">הכנסות / החזרים</div><div class="v pos"><span class="money">+${fmt(s.totalIncome)}</span></div></div>
       <div class="card stat"><div class="muted">ממוצע ליום</div><div class="v"><span class="money">${fmt(s.perDay)}</span></div></div>
@@ -827,6 +855,111 @@ async function tripPage(id) {
   }, reportError));
 }
 
+// ---------------------------------------------------------------- budget screen (#/trip/<id>/budget)
+const RING_C = 2 * Math.PI * 70;
+function budgetTile(trip, b, fmt) {
+  const over = b.left < 0;
+  const tick = b.expectedPct != null && b.elapsed > 0 && b.daysLeft > 0;
+  const right = tick ? `<span><i class="tick-key" aria-hidden="true"></i> היום אמורים להיות ב-<span class="num">${Math.round(b.expectedPct * 100)}%</span></span>`
+    : b.tripDays == null ? '' : b.daysLeft === 0 ? '<span>הטיול הסתיים</span>' : `<span><span class="num">${b.daysLeft}</span> ימים נשארו</span>`;
+  return `<a class="card btile ${b.level}" href="#/trip/${encodeURIComponent(trip.id)}/budget">
+      <div class="b-top"><span class="b-lbl">💰 תקציב</span><span class="b-go">לפרטים ◂</span></div>
+      <div class="b-top"><span class="b-v ${over ? 'neg' : ''}"><span class="money">${esc(fmt(Math.abs(b.left)))}</span> <small>${over ? 'מעל התקציב' : 'נשארו'}</small></span>
+        <span class="b-of">${over ? 'תקציב' : 'מתוך'} <span class="money">${esc(fmt(b.total))}</span></span></div>
+      <div class="meter" role="img" aria-label="נוצלו ${Math.round(b.pct * 100)}% מהתקציב"><i style="width:${Math.min(b.pct, 1) * 100}%"></i>${tick ? `<span class="tick" style="inset-inline-start:${b.expectedPct * 100}%"></span>` : ''}</div>
+      <div class="b-legend"><span><span class="num">${Math.round(b.pct * 100)}%</span> נוצל</span>${right}</div></a>`;
+}
+
+async function budgetPage(id) {
+  if (accessLeft(id) <= 0) return go('#/trip/' + encodeURIComponent(id)); // the trip page asks for the password
+  view.innerHTML = `<div class="wrap" style="padding-top:40px"><div class="skeleton"></div></div>`;
+  const st = { trip: null, expenses: [], mode: 'total' };
+  let gotT = false, gotE = false;
+  const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
+  const short = v => L.formatMoney(Math.round(v), st.trip.defaultCurrency).replace(/\.00$/, '');
+  const draw = () => {
+    if (!gotT || !gotE) return;
+    const t = st.trip, b = L.budgetSummary(t, st.expenses, todayIso());
+    const head = `<header class="bhead" style="background:${tripBg(t.color)}"><div class="bh-row">
+        <a class="ib" href="#/trip/${encodeURIComponent(t.id)}" title="חזרה לטיול" aria-label="חזרה לטיול">→</a>
+        <h1>💰 תקציב · <bdi>${esc(t.name)}</bdi></h1>
+        <button type="button" class="ib" data-edit-budget title="עריכת התקציב" aria-label="עריכת התקציב">✏️</button></div></header>`;
+    if (!b) {
+      view.innerHTML = head + `<div class="wrap"><div class="empty"><div class="big">💰</div><p>אין תקציב לטיול הזה.</p>
+        <button type="button" class="btn primary" data-edit-budget>✏️ להוסיף תקציב</button></div></div>`;
+      return bind();
+    }
+    const tabs = `<div class="tabs" role="tablist"><button role="tab" data-bmode="total" aria-selected="${st.mode === 'total'}">סה"כ</button>
+      <button role="tab" data-bmode="day" aria-selected="${st.mode === 'day'}">לפי יום</button></div>`;
+    let body = '';
+    if (st.mode === 'total') {
+      const col = { ok: '#047857', warn: '#F59E0B', over: '#BE123C' }[b.level];
+      const over = b.left < 0;
+      const diff = b.avgPerDay != null && b.daily != null ? round(b.avgPerDay - b.daily) : null;
+      body = `<div class="card b-main">
+          <svg class="ring" width="170" height="170" viewBox="0 0 170 170" role="img" aria-label="נוצלו ${Math.round(b.pct * 100)}% מהתקציב">
+            <circle cx="85" cy="85" r="70" fill="none" stroke="var(--track)" stroke-width="16"/>
+            <circle cx="85" cy="85" r="70" fill="none" stroke="${col}" stroke-width="16" stroke-linecap="round" stroke-dasharray="${Math.min(b.pct, 1) * RING_C} ${RING_C}" transform="rotate(-90 85 85)"/>
+            <text x="85" y="84" text-anchor="middle" class="ring-v">${Math.round(b.pct * 100)}%</text><text x="85" y="108" text-anchor="middle" class="ring-s">נוצל</text></svg>
+          <div class="b-big ${over ? 'neg' : ''}"><span class="money">${esc(fmt(Math.abs(b.left)))}</span></div>
+          <div class="muted center">${over ? 'מעל התקציב של' : 'נשארו מתוך'} <span class="money">${esc(fmt(b.total))}</span></div></div>
+        <div class="row2 b-kv">
+          <div class="card"><span class="muted">הוצאנו</span><b><span class="money">${esc(fmt(b.spent))}</span></b></div>
+          ${b.tripDays ? `<div class="card"><span class="muted">ימים שנשארו</span><b>${b.daysLeft === 0 ? 'הטיול הסתיים' : `<span class="num">${b.daysLeft}</span> מתוך <span class="num">${b.tripDays}</span>`}</b></div>` : ''}
+          ${b.avgPerDay != null ? `<div class="card"><span class="muted">ממוצע ליום עד עכשיו</span><b><span class="money">${esc(short(b.avgPerDay))}</span>
+            ${diff ? `<small class="${diff > 0 ? 'neg' : 'pos'}">${diff > 0 ? '▲' : '▼'} <span class="num">${Math.abs(Math.round(diff))}</span></small>` : ''}</b></div>` : ''}
+          ${b.daily != null ? `<div class="card"><span class="muted">תקציב ליום</span><b><span class="money">${esc(short(b.daily))}</span></b></div>` : ''}
+        </div>
+        ${b.allowedPerDay != null ? (over
+          ? `<div class="b-tip warn">⚠️ כבר מעל התקציב ב-<b><span class="money">${esc(fmt(-b.left))}</span></b>.</div>`
+          : `<div class="b-tip">👉 כדי לעמוד בתקציב: עד <b><span class="money">${esc(short(b.allowedPerDay))}</span></b> ליום ב-<span class="num">${b.daysLeft}</span> ${b.daysLeft === 1 ? 'היום שנשאר' : 'הימים שנשארו'}.</div>`) : ''}
+        ${b.projection != null ? (b.projection > b.total
+          ? `<div class="b-tip warn">📈 בקצב הנוכחי הטיול יעלה בערך <b><span class="money">${esc(short(b.projection))}</span></b> – <span class="money">${esc(short(b.projection - b.total))}</span> מעל התקציב.</div>`
+          : `<div class="b-tip good">📈 בקצב הנוכחי הטיול יעלה בערך <b><span class="money">${esc(short(b.projection))}</span></b> – בתוך התקציב 👍</div>`) : ''}
+        ${!b.tripDays ? `<p class="muted small center">בלי תאריכי טיול אין חישוב ליום. אפשר להוסיף תאריכים ב-✏️.</p>` : ''}`;
+    } else if (!b.tripDays) {
+      body = `<div class="empty"><div class="big">📅</div><p>כדי לראות תקציב לפי יום צריך תאריכי התחלה וסיום לטיול.</p>
+        <button type="button" class="btn primary" data-edit-budget>✏️ להוסיף תאריכים</button></div>`;
+    } else {
+      const max = Math.max(b.daily * 1.25, ...b.days.map(d => d.spent), ...b.days.map(d => d.allowed || 0)) || 1;
+      const pastDays = b.days.filter(d => !d.future);
+      const nOver = pastDays.filter(d => d.spent > b.daily).length;
+      body = `<div class="card b-daily"><div><span class="muted">תקציב ליום</span><b><span class="money">${esc(short(b.daily))}</span></b></div>
+          ${b.avgPerDay != null ? `<div class="b-end"><span class="muted">ממוצע בפועל</span><b class="${b.avgPerDay > b.daily ? 'neg' : 'pos'}"><span class="money">${esc(short(b.avgPerDay))}</span></b></div>` : ''}</div>
+        <div class="card b-days">${b.days.map(d => {
+          const label = `${d.today ? '<b>היום</b> ' : ''}${esc(formatDate(d.date, { weekday: 'short', day: 'numeric', month: 'numeric' }))}`;
+          const w = d.future ? (d.allowed || 0) / max * 100 : Math.max(d.spent, 0) / max * 100;
+          const cls = d.future ? 'f' : d.spent > b.daily ? 'o' : '';
+          const amt = d.future ? `<span class="money">${esc(short(d.allowed || 0))}</span><small>מותר</small>`
+            : `<span class="money">${esc(short(d.spent))}</span><small class="${d.diff > 0 ? 'neg' : 'pos'}">${d.diff > 0 ? '▲' : '▼'} <span class="num">${Math.abs(Math.round(d.diff))}</span></small>`;
+          return `<button type="button" class="drow ${d.today ? 'today' : ''} ${d.future ? 'fut' : ''}" data-day="${esc(d.date)}" ${d.future ? 'disabled' : ''}>
+            <span class="d-lbl">${label}</span><span class="bar"><i class="${cls}" style="width:${w}%"></i><span class="line" style="inset-inline-start:${b.daily / max * 100}%"></span></span>
+            <span class="amt">${amt}</span></button>`;
+        }).join('')}
+          ${b.outside ? `<div class="drow out"><span class="d-lbl">מחוץ לתאריכי הטיול</span><span></span><span class="amt"><span class="money">${esc(short(b.outside))}</span></span></div>` : ''}
+          <div class="b-legend"><span><i class="tick-key" aria-hidden="true"></i> קו = <span class="money">${esc(short(b.daily))}</span> ליום</span>
+            <span><span class="num">${pastDays.length - nOver}</span> ימים בתקציב · <span class="num">${nOver}</span> מעל</span></div></div>
+        <p class="muted small center">לחיצה על יום מציגה את ההוצאות שלו בדף הטיול.</p>`;
+    }
+    view.innerHTML = head + tabs + `<div class="wrap">${body}</div>`;
+    bind();
+  };
+  const round = v => Math.round(v * 100) / 100;
+  const bind = () => {
+    $$('[data-edit-budget]').forEach(x => x.onclick = () => editTripSheet(st));
+    $$('[data-bmode]').forEach(x => x.onclick = () => { st.mode = x.dataset.bmode; draw(); $(`[data-bmode=${st.mode}]`)?.focus(); });
+    $$('[data-day]').forEach(x => x.onclick = () => {
+      try { sessionStorage.setItem('tt-focus-day:' + id, x.dataset.day); } catch {}
+      go('#/trip/' + id);
+    });
+  };
+  cleanups.push(store.onTrip(id, trip => {
+    if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
+    st.trip = trip; gotT = true; draw();
+  }, reportError));
+  cleanups.push(store.onExpenses(id, list => { st.expenses = list; gotE = true; draw(); }, reportError));
+}
+
 // ---------------------------------------------------------------- trip color, participants, groups
 function tripBg(key) { const c = L.tripColor(key); return `linear-gradient(135deg, ${c.from}, ${c.to})`; }
 
@@ -906,20 +1039,23 @@ function editTripSheet(st) {
     if (t.groups?.length) data.groups = t.groups // drop people who left the trip, and groups left empty
       .map(g => ({ name: g.name || '', members: (g.members || []).filter(p => data.participants.includes(p)) })).filter(g => g.members.length);
     const btn = $('button.primary', m.el);
-    if (data.defaultCurrency !== t.defaultCurrency && st.expenses.length) {
+    // A budget the user did not touch is in the old currency and gets converted with the expenses.
+    const convertBudget = !!(data.budget && t.budget && !read.budgetTouched());
+    if (data.defaultCurrency !== t.defaultCurrency && (st.expenses.length || convertBudget)) {
       btn.disabled = true; btn.textContent = 'טוען שער…';
       let r;
       try { r = await getRate(t.defaultCurrency, data.defaultCurrency); }
       catch { btn.disabled = false; btn.textContent = 'שמירה'; return toast('אין שער המרה כרגע (אין חיבור?). נסו שוב מאוחר יותר', 'bad'); }
       btn.disabled = false; btn.textContent = 'שמירה';
       const ok = await confirmBox('החלפת מטבע הטיול',
-        `כל ${st.expenses.length} התנועות יומרו מ-${t.defaultCurrency} ל-${data.defaultCurrency} לפי שער ${r.rate.toFixed(4)}${r.source === 'cache' ? ' (שער שמור)' : ''}. להמשיך?`);
+        `${st.expenses.length ? `כל ${st.expenses.length} התנועות${convertBudget ? ' והתקציב' : ''} יומרו` : 'התקציב יומר'} מ-${t.defaultCurrency} ל-${data.defaultCurrency} לפי שער ${r.rate.toFixed(4)}${r.source === 'cache' ? ' (שער שמור)' : ''}. להמשיך?`);
       if (!ok) return;
-      // Expenses first, the trip's currency only after they succeed, so the two never disagree.
-      const { defaultCurrency, ...rest } = data;
+      // Expenses first; the trip's currency and budget only after they succeed, so they never disagree.
+      const { defaultCurrency, budget, ...rest } = data;
+      const newBudget = convertBudget ? { ...budget, amount: L.round2(budget.amount * r.rate) } : budget;
       fire(store.updateTrip(t.id, rest));
       fire(store.updateExpenses(t.id, st.expenses.map(x => ({ id: x.id, patch: L.reconvert(x, defaultCurrency, r.rate) })))
-        .then(() => store.updateTrip(t.id, { defaultCurrency })));
+        .then(() => store.updateTrip(t.id, { defaultCurrency, budget: newBudget })));
       m.close(); toast('הפרטים נשמרו', 'good');
       return;
     }
@@ -1282,7 +1418,8 @@ function printReport(st) {
     <div class="kpis">
       <div>סה"כ הוצאות<b class="n">${esc(f(s.totalExpenses))}</b></div><div>הכנסות / החזרים<b class="n">${esc(f(s.totalIncome))}</b></div>
       <div>מאזן נטו<b class="n">${esc(f(s.net))}</b></div><div>ממוצע ליום (${s.days})<b class="n">${esc(f(s.perDay))}</b></div>
-      <div>ממוצע לאדם<b class="n">${esc(f(s.perPerson))}</b></div></div>
+      <div>ממוצע לאדם<b class="n">${esc(f(s.perPerson))}</b></div>
+      ${(b => b ? `<div>תקציב (${Math.round(b.pct * 100)}% נוצל)<b class="n">${esc(f(b.total))}</b></div><div>${b.left < 0 ? 'מעל התקציב' : 'נשאר בתקציב'}<b class="n">${esc(f(Math.abs(b.left)))}</b></div>` : '')(L.budgetSummary(t, st.expenses, todayIso()))}</div>
     <h2>לפי קטגוריות</h2>
     <table><thead><tr><th>קטגוריה</th><th>תנועות</th><th>סכום</th><th>%</th></tr></thead><tbody>
       ${cats.map(c => `<tr><td>${esc(c.name)}</td>${n(c.count)}${n(f(c.value))}${n(s.totalExpenses ? Math.round(c.value / s.totalExpenses * 100) + '%' : '')}</tr>`).join('')}</tbody></table>
