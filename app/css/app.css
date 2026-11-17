@@ -547,3 +547,7 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 :root[dir=ltr] .toast .bar { transform-origin: left; }
 .tag button { margin: 0; margin-block: -6px; margin-inline: -4px -8px; }
 .fab { padding-block: 0; padding-inline: 26px 24px; }
+/* wide screens: 🌐 and ❓ go up next to the name (owner 1.22); phones keep them on a second row */
+@media (min-width: 560px) {
+  .topbar.home-top { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "brand pills admin"; }
+}
