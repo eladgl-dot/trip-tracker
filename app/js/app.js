@@ -4,7 +4,8 @@ import * as L from './logic.js';
 import { esc, $, $$, toast, modal, confirmBox, codePrompt, reportError, formatDate, dateRange, todayIso, closeAll, undoToast, hideUndoToast } from './ui.js';
 import { breakdown, bars } from './charts.js';
 import { hashPin, checkPin, hashAdmin } from './pin.js';
-import { getRate, prefetchRates } from './rates.js';
+import { getRate, prefetchRates, getDayRates } from './rates.js';
+import { readReceipt } from './ocr.js';
 import { watchLocation, fillAddresses } from './geo.js';
 import { shrinkImage } from './photo.js';
 import { ADMIN_HASH } from '../config.js';
@@ -47,7 +48,19 @@ const tagChip = (tag, extra = '') => { const c = L.tagColor(tag); return `<span 
 // Home view settings, remembered on this phone: scope 'mine'|'all', group 'year'|'tag'|'none', tag filter.
 const HOME_KEY = 'tt-home';
 const homePrefs = () => { try { return JSON.parse(ls.get(HOME_KEY)) || {}; } catch { return {}; } };
-const GROUP_NAMES = { year: 'לפי שנה', tag: 'לפי תגית', none: 'בלי קיבוץ' };
+const GROUP_NAMES = { year: 'לפי שנה', tag: 'לפי תגית', country: 'לפי מדינה', none: 'בלי קיבוץ' };
+
+// Theme: a trip page uses the trip's setting (light / dark / auto); every other page follows the phone.
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(mode) {
+  document.documentElement.dataset.theme = mode;
+  const dark = mode === 'dark' || (mode === 'auto' && darkQuery.matches);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0B1220' : '#F3F6FA');
+}
+darkQuery.addEventListener?.('change', () => applyTheme(document.documentElement.dataset.theme || 'auto'));
+// Country flags (pictures, because Windows shows emoji flags as letters).
+const flagImg = c => `<img class="flag" src="${L.flagUrl(c)}" alt="${esc(L.countryName(c))}" title="${esc(L.countryName(c))}" width="21" height="16" loading="lazy">`;
+const flagsOf = t => { const cs = L.cleanCountries(t.countries); return cs.length ? `<span class="flags">${cs.map(flagImg).join('')}</span>` : ''; };
 
 const go = hash => { if (location.hash === hash) route(); else location.hash = hash; };
 // Writes resolve only after the server confirms; offline they are queued, so never block the UI on them.
@@ -110,6 +123,8 @@ function route() {
   window.scrollTo(0, 0);
   const h = location.hash.replace(/^#\/?/, '');
   const [page, id, sub] = h.split('/');
+  // trip pages: the theme remembered from the last visit until the trip loads; other pages follow the phone
+  applyTheme(page === 'trip' && id ? L.THEMES.find(x => x === ls.get('tt-theme:' + id)) || 'auto' : 'auto');
   if (page === 'new') return createTripPage();
   if (page === 'trip' && id && sub === 'budget') return budgetPage(id);
   if (page === 'trip' && id) return tripPage(id);
@@ -267,19 +282,19 @@ function homePage() {
     if (!mine) return `<article class="card trip-card other" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)} – פתיחה עם סיסמה">
         <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
         <h3><bdi>${esc(t.name)}</bdi></h3>
-        <div class="muted">📍 <bdi>${esc(t.location)}</bdi>${t.startDate ? ` · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}</div>
+        <div class="muted">${flagsOf(t) || '📍'} <bdi>${esc(t.location)}</bdi>${t.startDate ? ` · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}</div>
         <div class="tags">${tags}<span class="muted small">🔒 פתיחה עם סיסמה</span></div>
       </article>`;
     const left = accessLeft(t.id);
     const days = Math.ceil(left / 86400000);
-    return `<article class="card trip-card" style="background:${tripBg(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
+    return `<article class="card trip-card" style="${tripStyle(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
         <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
         <h3><bdi>${esc(t.name)}</bdi>${st.scope === 'all' ? ' <span class="star" title="שלי" aria-label="שלי">⭐</span>' : ''}</h3>
-        <div class="muted">📍 <bdi>${esc(t.location)}</bdi></div>
+        <div class="muted">${flagsOf(t) || '📍'} <bdi>${esc(t.location)}</bdi></div>
         <div class="chips">
           ${t.startDate ? `<span class="chip sky num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}
           <span class="chip">👥 ${t.participants.length} משתתפים</span>
-          <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
+          <span class="chip mint">${L.viewCurrencyOf(t) ? `<bdi dir="ltr">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)} → ${esc(L.currencySymbol(L.viewCurrencyOf(t)))}</bdi>` : `${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}`}</span>
         </div>
         ${tags ? `<div class="tags">${tags}</div>` : ''}
         ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? 'מחר' : `עוד ${days} ימים`} צריך להזין את הסיסמא שוב</div>` : ''}
@@ -324,7 +339,7 @@ function homePage() {
         const defOpen = filtered || st.group !== 'year' || i === 0 || g.label === String(new Date().getFullYear());
         const open = st.toggled.has(g.key) ? !defOpen : defOpen;
         const head = !g.label ? '' : `<button type="button" class="sec ${open ? '' : 'closed'}" data-sec="${esc(g.key)}" aria-expanded="${open}">
-            ${g.tag ? tagChip(g.tag) : `<span><bdi>${esc(g.label)}</bdi></span>`}
+            ${g.tag ? tagChip(g.tag) : `<span>${g.country ? flagImg(g.country) + ' ' : ''}<bdi>${esc(g.label)}</bdi></span>`}
             <span class="cnt">· <span class="num">${g.trips.length}</span> ${g.trips.length === 1 ? 'טיול' : 'טיולים'}</span><span class="chev" aria-hidden="true">${open ? '▾' : '◂'}</span></button>`;
         return head + (open ? g.trips.map(t => card(t, mine.has(t.id))).join('') : '');
       }).join('');
@@ -474,7 +489,15 @@ function tripFormHtml(t, withPin) {
       <div><label class="lbl" for="f-end">תאריך סיום</label><input id="f-end" type="date" value="${esc(t.endDate || '')}"></div>
       <p class="err" style="grid-column:1/-1"></p>
     </div>
-    <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">מטבע ברירת מחדל *</label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
+    <div class="field"><label class="lbl" for="f-cty-in">🌍 מדינות</label>
+      <div class="chips" id="f-cty"></div>
+      <input id="f-cty-in" type="search" placeholder="חיפוש מדינה…" autocomplete="off" enterkeyhint="search">
+      <div class="cty-list" id="f-cty-list" role="group" aria-label="תוצאות חיפוש מדינה"></div>
+      <div class="cty-sug" id="f-cty-sug"></div></div>
+    <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">מטבע הזנה * <span class="small">(ברירת המחדל להוצאה חדשה)</span></label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
+    <div class="field"><label class="lbl" for="f-vcur">מטבע תצוגה <span class="small">(סכומים, התחשבנות, תקציב, גרפים)</span></label>
+      <select id="f-vcur"><option value="">כמו מטבע ההזנה</option>${currencyOptions(L.viewCurrencyOf(t))}</select>
+      <p class="muted small">כל הוצאה מומרת לפי השער של היום שבו שולמה. בדף הטיול אפשר לעבור בין שני המטבעות.</p></div>
     <div class="field" data-f="budget"><label class="lbl" for="f-bud">💰 תקציב <span class="small">(לא חובה)</span></label>
       <div class="toggle" role="group" aria-label="סוג התקציב" id="f-bud-per"><button type="button" data-per="trip" aria-pressed="${t.budget?.per !== 'day'}">לכל הטיול</button><button type="button" data-per="day" aria-pressed="${t.budget?.per === 'day'}">ליום</button></div>
       <div class="chip-input bud-in"><input id="f-bud" class="num" inputmode="decimal" autocomplete="off" placeholder="ריק = בלי תקציב" value="${t.budget?.amount ?? ''}"><span class="chip mint" id="f-bud-cur"></span></div>
@@ -482,6 +505,10 @@ function tripFormHtml(t, withPin) {
     <div class="field"><span class="lbl" id="f-color-l">צבע הטיול</span>
       <div class="swatches" id="f-color" role="radiogroup" aria-labelledby="f-color-l">${L.TRIP_COLORS.map(c => `<button type="button" role="radio" class="sw"
         data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${c.name}" title="${c.name}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
+    <div class="field"><span class="lbl" id="f-theme-l">🌓 ערכת צבעים לטיול</span>
+      <div class="toggle three" role="group" aria-labelledby="f-theme-l" id="f-theme">${[['light', '☀️ בהיר'], ['dark', '🌙 כהה'], ['auto', '📱 אוטומטי']].map(([k, n]) =>
+        `<button type="button" data-th="${k}" aria-pressed="${L.tripTheme(t) === k}">${n}</button>`).join('')}</div>
+      <p class="muted small">כל מי שפותח את הטיול רואה אותו כך. אוטומטי = לפי הגדרת הטלפון.</p></div>
     ${tagPickerHtml()}
     <div class="field" data-f="participants">
       <label class="lbl" for="f-person">משתתפים * <span class="small">(⭐ = ברירת המחדל ב"מי שילם"; לחיצה על שם הופכת אותו לראשון)</span></label>
@@ -494,7 +521,7 @@ function tripFormHtml(t, withPin) {
 }
 
 // Wires the form. lockedNames: participants that can't be removed (they have transactions).
-function bindTripForm(root, t, lockedNames = new Set()) {
+function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
   const people = [...(t.participants || [])];
   const chips = $('#f-chips', root), input = $('#f-person', root);
   const draw = () => {
@@ -522,6 +549,31 @@ function bindTripForm(root, t, lockedNames = new Set()) {
     $$('[data-color]', root).forEach(x => x.setAttribute('aria-checked', x === b));
   });
   const readTags = bindTagPicker(root, t.tags);
+  // theme
+  let theme = L.tripTheme(t);
+  $$('[data-th]', root).forEach(b => b.onclick = () => { theme = b.dataset.th; $$('[data-th]', root).forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  // countries: search box + suggestions from the trip name, place and the expenses' addresses
+  const ctys = L.cleanCountries(t.countries);
+  const ctyIn = $('#f-cty-in', root);
+  const ctyBtn = (c, cls) => `<button type="button" class="cty-btn ${cls}" data-cadd="${c}">${flagImg(c)} ${esc(L.countryName(c))}${cls === 'sug' ? ' +' : ''}</button>`;
+  const drawCty = () => {
+    $('#f-cty', root).innerHTML = ctys.map((c, i) => `<span class="chip sky">${flagImg(c)} ${esc(L.countryName(c))}<button type="button" data-crm="${i}" aria-label="הסרת ${esc(L.countryName(c))}">✕</button></span>`).join('');
+    const q = ctyIn.value.trim().toLowerCase();
+    const hits = !q ? [] : L.COUNTRY_CODES.filter(c => !ctys.includes(c) && ['he', 'en', 'ru'].some(l => L.countryName(c, l).toLowerCase().includes(q)))
+      .sort((a, b) => L.countryName(a).localeCompare(L.countryName(b), 'he')).slice(0, 8);
+    $('#f-cty-list', root).innerHTML = q && !hits.length ? '<span class="muted small">לא נמצאה מדינה</span>' : hits.map(c => ctyBtn(c, '')).join('');
+    const sug = ctys.length >= L.MAX_COUNTRIES ? [] : L.suggestCountries([$('#f-name', root).value, $('#f-loc', root).value, ...hints], ctys).slice(0, 3);
+    $('#f-cty-sug', root).innerHTML = sug.length ? `<span class="lbl2">💡 הצעה:</span>${sug.map(c => ctyBtn(c, 'sug')).join('')}` : '';
+  };
+  ctyIn.closest('.field').addEventListener('click', ev => { // on the field, not root: root may be the page, reused by later screens
+    const add = ev.target.closest('[data-cadd]'), rm = ev.target.closest('[data-crm]');
+    if (add && ctys.length < L.MAX_COUNTRIES) { ctys.push(add.dataset.cadd); ctyIn.value = ''; drawCty(); }
+    else if (rm) { ctys.splice(+rm.dataset.crm, 1); drawCty(); }
+  });
+  ctyIn.addEventListener('input', drawCty);
+  ctyIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('#f-cty-list [data-cadd]', root)?.click(); } });
+  ['#f-name', '#f-loc'].forEach(sel => $(sel, root).addEventListener('input', drawCty));
+  drawCty();
   // budget: amount + "for the whole trip / per day"; the hint shows the other number
   let per = t.budget?.per === 'day' ? 'day' : 'trip', budTouched = false;
   const budHint = () => {
@@ -549,6 +601,7 @@ function bindTripForm(root, t, lockedNames = new Set()) {
       name: $('#f-name', root).value.trim(), location: $('#f-loc', root).value.trim(),
       startDate: $('#f-start', root).value, endDate: $('#f-end', root).value,
       defaultCurrency: $('#f-cur', root).value, participants: [...people], color, tags: readTags(),
+      countries: [...ctys], theme, viewCurrency: $('#f-vcur', root).value === $('#f-cur', root).value ? '' : $('#f-vcur', root).value,
       budget: $('#f-bud', root).value.trim() ? { amount: L.round2(L.parseAmount($('#f-bud', root).value)), per } : null
     };
     if (pin) data.pin = pin.value;
@@ -582,6 +635,34 @@ function createTripPage() {
   };
 }
 
+// ---------------------------------------------------------------- view currency
+// Totals in the trip's view currency, each expense at the rate of its own day (owner, Step 24).
+// The € ⇄ ₪ choice is per phone. Rates load in the background; until then the input currency is shown.
+const viewKey = id => 'tt-view:' + id;
+function viewState(id, redraw) {
+  let vr = null, job = '';
+  return {
+    reset() { vr = null; job = ''; },
+    compute(t, expenses) {
+      const pair = L.viewCurrencyOf(t);
+      const base = { pair, cur: t.defaultCurrency, list: expenses, trip: t, wait: false, fail: false };
+      if (!pair || ls.get(viewKey(id)) === 'in') return base;
+      const range = L.rateRange(expenses, todayIso());
+      const pairKey = t.defaultCurrency + '>' + pair, key = pairKey + ':' + (range ? range.from + '..' + range.to : '');
+      if ((!vr || vr.key !== key) && job !== key) {
+        job = key;
+        getDayRates(t.defaultCurrency, pair, range, L.hasRatesFor).then(r => { if (job === key) { vr = { ...r, key, pairKey }; redraw(); } });
+      }
+      const ok = vr && vr.pairKey === pairKey ? vr : null;
+      if (!ok) return { ...base, wait: true };
+      const today = ok.today > 0 ? ok.today : L.rateOnDate(ok.map, todayIso(), 0);
+      if (!(today > 0)) return { ...base, fail: true };
+      return { pair, cur: pair, wait: false, fail: false, list: L.toViewCurrency(expenses, ok.map, today),
+        trip: t.budget ? { ...t, budget: { ...t.budget, amount: L.round2(t.budget.amount * today) } } : t };
+    }
+  };
+}
+
 // ---------------------------------------------------------------- trip page
 async function tripPage(id) {
   let day = null; try { day = sessionStorage.getItem('tt-focus-day:' + id); sessionStorage.removeItem('tt-focus-day:' + id); } catch {} // tap on a day in the budget screen
@@ -596,8 +677,10 @@ async function tripPage(id) {
     if (!here()) return;
     if (!ok) return go('#/');
   }
-  const st = { trip: null, all: [], expenses: [], gone: false, tab: 'list', search: '', chart: day ? 'day' : 'cat', focus: day ? { kind: 'day', name: day } : null, who: '', built: false };
-  const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
+  const st = { trip: null, all: [], expenses: [], v: null, gone: false, tab: 'list', search: '', chart: day ? 'day' : 'cat', focus: day ? { kind: 'day', name: day } : null, who: '', built: false };
+  let alive = true; cleanups.push(() => { alive = false; });
+  const vs = viewState(id, () => { if (alive) drawAll(); });
+  const fmt = v => L.formatMoney(v, st.v?.cur || st.trip.defaultCurrency);
   // Expenses waiting to be deleted (undo still possible) are hidden from every view.
   const hideKey = eid => id + ':' + eid;
   const showList = () => { st.expenses = st.all.filter(x => !pending.has(hideKey(x.id))); };
@@ -650,6 +733,7 @@ async function tripPage(id) {
       else if (e.target.closest('#share')) shareTrip(st.trip);
       else if (e.target.closest('#pdf')) printReport(st);
       else if (e.target.closest('[data-unfocus]')) setFocus(null);
+      else if (e.target.closest('[data-cur]')) { ls.set(viewKey(id), e.target.closest('[data-cur]').dataset.cur === st.trip.defaultCurrency ? 'in' : 'view'); drawAll(); }
       else if (e.target.closest('[data-hide-banner]')) { try { localStorage.setItem('tt-grp-banner-' + st.trip.id, '0'); } catch {} drawSettle(); }
     };
     view.addEventListener('click', onClick); cleanups.push(() => view.removeEventListener('click', onClick));
@@ -705,29 +789,32 @@ async function tripPage(id) {
   const drawHero = () => {
     const t = st.trip;
     const len = t.startDate && t.endDate ? L.daysBetween(t.startDate, t.endDate) : 0;
-    const bg = tripBg(t.color);
     const btns = title => [`<a class="ib" href="#/" title="לכל הטיולים" aria-label="לכל הטיולים">→</a>`, title,
       `<button class="ib" data-edit-trip title="עריכת פרטי טיול" aria-label="עריכת פרטי טיול">✏️</button>`].join('');
     const hero = $('#hero');
-    hero.style.background = bg;
+    hero.style.cssText = tripStyle(t.color);
     hero.innerHTML = `<div class="tb-row">${btns(`<h1>${esc(t.name)}</h1>`)}</div>
-      <div class="tb-meta">📍 ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
+      <div class="tb-meta">${flagsOf(t) || '📍'} ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
       <div class="chips tb-chips"><button type="button" class="chip ppl" data-people title="משתתפים" aria-label="משתתפים (${t.participants.length})">👥 <span class="num">${t.participants.length}</span></button>
-        <span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>
+        ${st.v.pair ? `<span class="cur-sw" role="group" aria-label="מטבע תצוגה">${[t.defaultCurrency, st.v.pair].map(c =>
+          `<button type="button" data-cur="${esc(c)}" aria-pressed="${(st.v.wait || st.v.fail ? ls.get(viewKey(id)) === 'in' ? t.defaultCurrency : st.v.pair : st.v.cur) === c}" title="${esc(c)}">${esc(L.currencySymbol(c))}</button>`).join('')}</span>`
+          : `<span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>`}
         <span class="tb-share"><button type="button" class="chip wa-chip" id="share" title="שיתוף בוואטסאפ">${WA_ICON}שיתוף</button>
           <button type="button" class="chip pdf-chip" id="pdf" title="ייצוא PDF">📄 PDF</button></span></div>`;
-    const s = L.summarize(t, st.expenses, todayIso());
+    const s = L.summarize(t, st.v.list, todayIso());
     const mini = $('#miniBar');
-    mini.style.background = bg;
+    mini.style.cssText = tripStyle(t.color);
     mini.innerHTML = `<div class="tb-row">${btns(`<div class="tb-t"><b>${esc(t.name)}</b><span>${s.days} ימים · <bdi class="money">${esc(fmt(s.net))}</bdi></span></div>`)}</div>`;
   };
 
   const drawStats = () => {
-    const s = L.summarize(st.trip, st.expenses, todayIso());
+    const s = L.summarize(st.v.trip, st.v.list, todayIso());
+    const t = st.trip, note = esc(st.v.cur !== t.defaultCurrency ? `💱 ב-${st.v.cur} · כל הוצאה לפי השער של היום שבו שולמה`
+      : st.v.wait ? `💱 טוען שערים ל-${st.v.pair}…` : st.v.fail ? `⚠️ אין שער ל-${st.v.pair} כרגע (אין חיבור?) – מוצג ב-${t.defaultCurrency}` : '');
     $('#stats').innerHTML = `
-      <div class="card stat big"><div><div class="muted">מאזן נטו (הוצאות פחות החזרים)</div><div class="v"><span class="money">${fmt(s.net)}</span></div></div>
+      <div class="card stat big"><div><div class="muted">מאזן נטו (הוצאות פחות החזרים)</div><div class="v"><span class="money">${fmt(s.net)}</span></div>${note ? `<div class="view-note">${note}</div>` : ''}</div>
         <span class="chip sky">${s.days} ימים · ${st.expenses.length} תנועות</span></div>
-      ${(b => b ? budgetTile(st.trip, b, fmt) : '')(L.budgetSummary(st.trip, st.expenses, todayIso()))}
+      ${(b => b ? budgetTile(st.v.trip, b, fmt) : '')(L.budgetSummary(st.v.trip, st.v.list, todayIso()))}
       <div class="card stat exp"><div class="muted">סה"כ הוצאות</div><div class="v neg"><span class="money">${fmt(s.totalExpenses)}</span></div></div>
       <div class="card stat inc"><div class="muted">הכנסות / החזרים</div><div class="v pos"><span class="money">+${fmt(s.totalIncome)}</span></div></div>
       <div class="card stat"><div class="muted">ממוצע ליום</div><div class="v"><span class="money">${fmt(s.perDay)}</span></div></div>
@@ -738,12 +825,12 @@ async function tripPage(id) {
     $$('[data-ch]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ch === st.chart));
     const host = $('#chart');
     const scrollX = host.querySelector('.bars-scroll')?.scrollLeft;
-    const items = st.chart === 'cat' ? L.byCategory(st.expenses) : L.byDay(st.expenses);
+    const items = st.chart === 'cat' ? L.byCategory(st.v.list) : L.byDay(st.v.list);
     if (st.focus && !items.some(d => d.name === st.focus.name)) st.focus = null; // its last expense was deleted/moved
     const selected = st.focus?.name ?? null;
     const onSelect = name => { st.focus = name ? { kind: st.chart, name } : null; drawList(); };
     if (st.chart === 'cat') breakdown(host, items, { fmt, label: n => `${L.categoryEmoji(n)} ${n}`, selected, onSelect });
-    else bars(host, items, { fmt, total: L.summarize(st.trip, st.expenses).totalExpenses, selected, onSelect });
+    else bars(host, items, { fmt, total: L.summarize(st.trip, st.v.list).totalExpenses, selected, onSelect });
     const sc = host.querySelector('.bars-scroll');
     if (sc && scrollX != null) sc.scrollLeft = scrollX;
   };
@@ -759,14 +846,17 @@ async function tripPage(id) {
       return `<div class="focus-pill"><span>${what} · <span class="num">${n}</span> ראשונות</span>
           <button type="button" class="x" data-unfocus title="ביטול" aria-label="ביטול הסידור">✕</button></div>`;
     };
-    const list = L.sortTransactions(st.expenses.filter(e => L.matchesSearch(e, st.search)));
+    const list = L.sortTransactions(st.v.list.filter(e => L.matchesSearch(e, st.search)));
     if (!st.expenses.length) {
       host.innerHTML = `<div class="empty"><div class="big">🧾</div><p>עדיין אין תנועות.<br>לחצו על + כדי להוסיף את ההוצאה הראשונה.</p></div>`; return;
     }
     if (!list.length) { host.innerHTML = focusPill(0) + `<div class="empty">לא נמצאו תנועות עבור "${esc(st.search)}"</div>`; return; }
     const card = (e, dim) => {
       const inc = e.type === 'income';
-      const other = e.currency !== st.trip.defaultCurrency;
+      // Showing the view currency: it goes first and the paid amount under it. Otherwise the paid amount first, as before.
+      const viewing = st.v.cur !== st.trip.defaultCurrency, sign = inc ? '+' : '';
+      const big = viewing && e.currency !== st.v.cur ? sign + fmt(e.convertedAmount) : sign + L.formatMoney(e.amount, e.currency);
+      const small = e.currency === st.v.cur ? '' : viewing ? L.formatMoney(e.amount, e.currency) : '≈ ' + fmt(e.convertedAmount);
       return `<div class="card tx ${inc ? 'income' : ''}${dim ? ' dim' : ''}">
         <div class="ic" aria-hidden="true">${inc ? '↩️' : L.categoryEmoji(e.category)}</div>
         <div class="mid">
@@ -778,8 +868,8 @@ async function tripPage(id) {
             ${e.photoIds?.length ? `<button class="mini pics" data-pics="${esc(e.id)}" title="תמונות" aria-label="${e.photoIds.length} תמונות">📷 ${e.photoIds.length}</button>` : ''}
             <button class="mini del" data-del="${esc(e.id)}" title="מחיקה" aria-label="מחיקה">🗑️</button></div>
         </div>
-        <div class="amt ${inc ? 'pos' : 'neg'}"><span class="money">${inc ? '+' : ''}${esc(L.formatMoney(e.amount, e.currency))}</span>
-          ${other ? `<small class="money">≈ ${esc(fmt(e.convertedAmount))}</small>` : ''}</div>
+        <div class="amt ${inc ? 'pos' : 'neg'}"><span class="money">${esc(big)}</span>
+          ${small ? `<small class="money">${esc(small)}</small>` : ''}</div>
       </div>`;
     };
     const days = (part, dim) => {
@@ -819,14 +909,14 @@ async function tripPage(id) {
     $('#who').innerHTML = ['', ...t.participants].map(p => `<button data-who="${esc(p)}" aria-pressed="${st.who === p}">${p ? esc(p) : 'כולם'}</button>`).join('');
     $$('[data-who]').forEach(b => b.onclick = () => { st.who = b.dataset.who; drawSettle(); });
 
-    const bal = L.balances(t.participants, st.expenses);
+    const bal = L.balances(t.participants, st.v.list);
     const groups = L.cleanGroups(t.groups, t.participants);
     const units = L.groupBalances(bal, groups);
     const transfers = L.settleTransfers(units);
     const unitOf = Object.fromEntries(units.flatMap(u => u.members.map(p => [p, u.name])));
     const mine = st.who ? unitOf[st.who] : '';
     const shown = st.who ? transfers.filter(x => x.from === mine || x.to === mine) : transfers;
-    const pieItems = st.who ? L.byCategory(st.expenses.filter(e => e.paidBy === st.who)) : L.byPayer(st.expenses);
+    const pieItems = st.who ? L.byCategory(st.v.list.filter(e => e.paidBy === st.who)) : L.byPayer(st.v.list);
     let bannerOn = true; try { bannerOn = localStorage.getItem('tt-grp-banner-' + t.id) !== '0'; } catch {}
     const solo = units.filter(u => !u.isGroup).length;
     const host = $('#settle');
@@ -865,6 +955,7 @@ async function tripPage(id) {
   const drawAll = () => {
     if (!st.trip || st.gone) return;
     if (!st.built) build();
+    st.v = vs.compute(st.trip, st.expenses);
     drawHero(); drawTabs(); drawStats(); drawChart(); drawList(); drawSettle();
   };
 
@@ -873,10 +964,10 @@ async function tripPage(id) {
     if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
     if (L.isDeleted(trip)) { st.gone = true; return deletedTripScreen(trip); }
     if (st.gone) return route(); // restored meanwhile: start the page fresh
-    st.trip = trip; if (gotExpenses) drawAll();
+    st.trip = trip; applyTheme(L.tripTheme(trip)); ls.set('tt-theme:' + id, L.tripTheme(trip)); if (gotExpenses) drawAll();
     prefetchRates(trip.defaultCurrency); // keep rates on the phone for offline (at most every 6 h)
   }, reportError));
-  const onOnline = () => st.trip && prefetchRates(st.trip.defaultCurrency);
+  const onOnline = () => { if (!st.trip) return; prefetchRates(st.trip.defaultCurrency); if (st.v?.fail) { vs.reset(); drawAll(); } };
   addEventListener('online', onOnline); cleanups.push(() => removeEventListener('online', onOnline));
   cleanups.push(store.onExpenses(id, list => {
     st.all = list; showList(); gotExpenses = true; drawAll();
@@ -917,12 +1008,16 @@ async function budgetPage(id) {
   view.innerHTML = `<div class="wrap" style="padding-top:40px"><div class="skeleton"></div></div>`;
   const st = { trip: null, expenses: [], mode: 'total' };
   let gotT = false, gotE = false;
-  const fmt = v => L.formatMoney(v, st.trip.defaultCurrency);
-  const short = v => L.formatMoney(Math.round(v), st.trip.defaultCurrency).replace(/\.00$/, '');
+  let alive = true; cleanups.push(() => { alive = false; });
+  const vs = viewState(id, () => { if (alive) draw(); });
+  let cur = '';
+  const fmt = v => L.formatMoney(v, cur || st.trip.defaultCurrency);
+  const short = v => L.formatMoney(Math.round(v), cur || st.trip.defaultCurrency).replace(/\.00$/, '');
   const draw = () => {
     if (!gotT || !gotE) return;
-    const t = st.trip, b = L.budgetSummary(t, st.expenses, todayIso());
-    const head = `<header class="bhead" style="background:${tripBg(t.color)}"><div class="bh-row">
+    const v = vs.compute(st.trip, st.expenses); cur = v.cur;
+    const t = v.trip, b = L.budgetSummary(t, v.list, todayIso());
+    const head = `<header class="bhead" style="${tripStyle(t.color)}"><div class="bh-row">
         <a class="ib" href="#/trip/${encodeURIComponent(t.id)}" title="חזרה לטיול" aria-label="חזרה לטיול">→</a>
         <h1>💰 תקציב · <bdi>${esc(t.name)}</bdi></h1>
         <button type="button" class="ib" data-edit-budget title="עריכת התקציב" aria-label="עריכת התקציב">✏️</button></div></header>`;
@@ -998,13 +1093,15 @@ async function budgetPage(id) {
   cleanups.push(store.onTrip(id, trip => {
     if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
     if (L.isDeleted(trip)) return go('#/trip/' + encodeURIComponent(id)); // the trip page shows "הטיול נמחק"
-    st.trip = trip; gotT = true; draw();
+    st.trip = trip; gotT = true; applyTheme(L.tripTheme(trip)); draw();
   }, reportError));
   cleanups.push(store.onExpenses(id, list => { st.expenses = list; gotE = true; draw(); }, reportError));
 }
 
 // ---------------------------------------------------------------- trip color, participants, groups
 function tripBg(key) { const c = L.tripColor(key); return `linear-gradient(135deg, ${c.from}, ${c.to})`; }
+// Inline style for a tinted surface: the light gradient plus its two colors, which the dark theme mixes into dark.
+function tripStyle(key) { const c = L.tripColor(key); return `background:${tripBg(key)};--tf:${c.from};--tt:${c.to}`; }
 
 function peoplePopup(st) {
   const t = st.trip;
@@ -1074,7 +1171,7 @@ function editTripSheet(st) {
   const locked = new Set(st.expenses.map(e => e.paidBy));
   const m = modal(`<h2>עריכת פרטי טיול</h2><form novalidate>${tripFormHtml(t, false)}
     <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button class="btn primary">שמירה</button></div></form>`, { sheet: true, label: 'עריכת פרטי טיול' });
-  const read = bindTripForm(m.el, t, locked);
+  const read = bindTripForm(m.el, t, locked, [...new Set(st.expenses.map(e => e.address).filter(Boolean))].slice(0, 40));
   $('[data-x]', m.el).onclick = () => m.close();
   $('form', m.el).onsubmit = async e => {
     e.preventDefault();
@@ -1114,6 +1211,9 @@ function expenseSheet(st, existing, type = 'expense') {
   const r = { rate: existing ? existing.exchangeRateToTripDefault : 1, source: existing ? 'saved' : 'live', at: 0, manual: false };
   const m = modal(`
     <h2>${existing ? 'עריכת תנועה' : 'הוספת תנועה'}</h2>
+    ${existing ? '' : `<button type="button" class="scan-bar" id="x-scan"><span aria-hidden="true">📷</span> סריקת קבלה</button>
+      <input type="file" id="x-scan-in" accept="image/*" hidden>
+      <div class="scan-st hidden" id="x-scan-st" aria-live="polite"></div>`}
     <form novalidate>
       <div class="type-toggle" role="group" aria-label="סוג תנועה">
         <button type="button" data-t="expense">הוצאה</button><button type="button" data-t="income">הכנסה / החזר</button></div>
@@ -1302,6 +1402,47 @@ function expenseSheet(st, existing, type = 'expense') {
     const saved = list.filter(p => existing.photoIds.includes(p.id) && L.isPhotoData(p.data));
     pics.unshift(...saved.map(p => ({ id: p.id, data: p.data }))); drawPics();
   }).catch(reportError);
+
+  // ---- receipt scan (new expense only): read the photo on the phone, fill the form, the user checks and saves
+  const scanBtn = $('#x-scan', el);
+  if (scanBtn) {
+    const scanIn = $('#x-scan-in', el), stBox = $('#x-scan-st', el);
+    const mark = f => { f.classList.add('ocr'); f.addEventListener('input', () => f.classList.remove('ocr'), { once: true }); f.addEventListener('change', () => f.classList.remove('ocr'), { once: true }); };
+    const status = (pct, text) => {
+      stBox.classList.remove('hidden', 'done');
+      stBox.innerHTML = `${esc(text)}<div class="prog"><i style="width:${Math.round(pct * 100)}%"></i></div>`;
+    };
+    scanBtn.onclick = () => scanIn.click();
+    scanIn.onchange = async () => {
+      const file = scanIn.files[0]; scanIn.value = '';
+      if (!file) return;
+      scanBtn.disabled = true;
+      const before = { amt: amt.value, cur: cur.value, date: $('#x-date', el).value }; // fields the user changes while it reads stay theirs
+      // the receipt photo is kept with the expense
+      if (pics.length + shrinking < L.MAX_PHOTOS) addFiles({ files: [file], set value(v) {} });
+      let text = '';
+      try { text = await readReceipt(file, status); }
+      catch (err) {
+        console.error(err);
+        stBox.classList.add('done');
+        stBox.textContent = navigator.onLine ? '⚠️ לא הצלחתי לקרוא את הקבלה. אפשר למלא ידנית.' : '⚠️ בפעם הראשונה צריך חיבור כדי להוריד את קבצי הזיהוי. אפשר למלא ידנית.';
+        scanBtn.disabled = false; return;
+      }
+      scanBtn.disabled = false;
+      if (!el.isConnected) return; // sheet closed meanwhile
+      const got = L.parseReceipt(text, { currency: cur.value, categories });
+      const filled = [];
+      const amtFree = amt.value === before.amt, curFree = cur.value === before.cur;
+      if (got.amount > 0 && amtFree) { amt.value = got.amount.toFixed(2); mark(amt); filled.push('סכום'); }
+      if (got.amount > 0 && amtFree && curFree && got.currency !== cur.value && L.CURRENCIES.some(c => c.code === got.currency)) { cur.value = got.currency; mark(cur); loadRate(); filled.push('מטבע'); }
+      else drawRate();
+      if (got.date && $('#x-date', el).value === before.date) { $('#x-date', el).value = got.date; mark($('#x-date', el)); filled.push('תאריך'); }
+      if (got.details && !$('#x-det', el).value.trim()) { $('#x-det', el).value = got.details; mark($('#x-det', el)); filled.push('פירוט'); }
+      if (got.category && !chosen) { chosen = got.category; drawCats(); mark(cat); filled.push('קטגוריה'); }
+      stBox.classList.remove('hidden'); stBox.classList.add('done');
+      stBox.textContent = filled.length ? `🟨 מולא מהקבלה: ${filled.join(', ')} – בדקו את השדות המסומנים ושמרו` : '⚠️ לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.';
+    };
+  }
 
   // ---- save / delete
   $('[data-x]', el).onclick = () => m.close();

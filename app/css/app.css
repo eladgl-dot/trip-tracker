@@ -428,3 +428,95 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 .trash-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }
 .trash-row .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .toast.undo:not(.on) { pointer-events: none; } /* fades out in its own layout, never catches taps */
+
+/* ---------- Step 24: dark theme (trip setting Light / Dark / Auto; home follows the phone) ---------- */
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --bg: #0B1220; --bg2: #0F172A; --card: #162032; --ink: #E2E8F0; --ink2: #A3B1C6; --ink3: #8695AB;
+  --sky: #38BDF8; --sky-d: #7DD3FC; --sky-btn: #38BDF8; --sky-soft: #10263A; --sky-chip: #0C2A3F;
+  --mint: #134E3A; --mint-d: #6EE7B7; --mint-soft: #0E2A22;
+  --peach: #5B1F2C; --peach-d: #FDA4AF; --peach-soft: #2A1219;
+  --lav: #2E2654; --lav-d: #C4B5FD;
+  --line: #26344B; --track: #1E293B; --focus: #0369A1;
+  --shadow: 0 4px 20px rgba(0,0,0,.35); --shadow-pop: 0 10px 30px rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme=auto] {
+    color-scheme: dark;
+    --bg: #0B1220; --bg2: #0F172A; --card: #162032; --ink: #E2E8F0; --ink2: #A3B1C6; --ink3: #8695AB;
+    --sky: #38BDF8; --sky-d: #7DD3FC; --sky-btn: #38BDF8; --sky-soft: #10263A; --sky-chip: #0C2A3F;
+    --mint: #134E3A; --mint-d: #6EE7B7; --mint-soft: #0E2A22;
+    --peach: #5B1F2C; --peach-d: #FDA4AF; --peach-soft: #2A1219;
+    --lav: #2E2654; --lav-d: #C4B5FD;
+    --line: #26344B; --track: #1E293B; --focus: #0369A1;
+    --shadow: 0 4px 20px rgba(0,0,0,.35); --shadow-pop: 0 10px 30px rgba(0,0,0,.6);
+  }
+}
+/* Fixed light colors elsewhere in this file, re-done for dark. :is() lets one list serve both cases. */
+:root[data-theme=dark] :is(.tripbar, .bhead, .trip-card:not(.other)) {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tf, #E0F2FE) 16%, #162032), color-mix(in srgb, var(--tt, #EDE9FE) 12%, #162032)) !important; }
+:root[data-theme=dark] :is(.hero, .install, .grp-banner) { background: linear-gradient(135deg, #10263A, #1F1B3A); }
+:root[data-theme=dark] :is(.ib, .bhead .ib) { background: rgba(255,255,255,.08); }
+:root[data-theme=dark] :is(.chip.wa-chip) { background: #0E2A1A; border-color: #166534; color: #86EFAC; }
+:root[data-theme=dark] .chip.pdf-chip { background: rgba(255,255,255,.06); }
+:root[data-theme=dark] .tx.income { background: #0F2A22; }
+:root[data-theme=dark] .bar-fill { background: #0369A1; }
+:root[data-theme=dark] :is(.offline, .rate-box.warn, .b-tip.warn) { background: #3A2C0A; color: #FCD34D; border-color: #713F12; }
+:root[data-theme=dark] :is(.btile.warn) { background: #2A220C; }
+:root[data-theme=dark] .help-pill { background: #1F1B3A; } :root[data-theme=dark] .help-more { background: #1F1B3A; }
+:root[data-theme=dark] .skeleton { background: linear-gradient(90deg, #162032 0%, #1E293B 50%, #162032 100%); background-size: 200% 100%; }
+:root[data-theme=dark] .grp.on { background: color-mix(in srgb, var(--g) 18%, #162032); }
+:root[data-theme=dark] .meter { background: rgba(255,255,255,.1); }
+:root[data-theme=dark] :is(.toast) { background: #E2E8F0; color: #0F172A; }
+:root[data-theme=dark] :is(input, select, textarea) { background-color: var(--bg2); color: var(--ink); }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme=auto] :is(.tripbar, .bhead, .trip-card:not(.other)) {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--tf, #E0F2FE) 16%, #162032), color-mix(in srgb, var(--tt, #EDE9FE) 12%, #162032)) !important; }
+  :root[data-theme=auto] :is(.hero, .install, .grp-banner) { background: linear-gradient(135deg, #10263A, #1F1B3A); }
+  :root[data-theme=auto] :is(.ib, .bhead .ib) { background: rgba(255,255,255,.08); }
+  :root[data-theme=auto] .chip.wa-chip { background: #0E2A1A; border-color: #166534; color: #86EFAC; }
+  :root[data-theme=auto] .chip.pdf-chip { background: rgba(255,255,255,.06); }
+  :root[data-theme=auto] .tx.income { background: #0F2A22; }
+  :root[data-theme=auto] .bar-fill { background: #0369A1; }
+  :root[data-theme=auto] :is(.offline, .rate-box.warn, .b-tip.warn) { background: #3A2C0A; color: #FCD34D; border-color: #713F12; }
+  :root[data-theme=auto] .btile.warn { background: #2A220C; }
+  :root[data-theme=auto] :is(.help-pill, .help-more) { background: #1F1B3A; }
+  :root[data-theme=auto] .skeleton { background: linear-gradient(90deg, #162032 0%, #1E293B 50%, #162032 100%); background-size: 200% 100%; }
+  :root[data-theme=auto] .grp.on { background: color-mix(in srgb, var(--g) 18%, #162032); }
+  :root[data-theme=auto] .meter { background: rgba(255,255,255,.1); }
+  :root[data-theme=auto] .toast { background: #E2E8F0; color: #0F172A; }
+  :root[data-theme=auto] :is(input, select, textarea) { background-color: var(--bg2); color: var(--ink); }
+}
+
+/* ---------- Step 24: country flags ---------- */
+.flag { width: 21px; height: 16px; border-radius: 3px; object-fit: cover; vertical-align: -2px; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+.flags { display: inline-flex; gap: 4px; vertical-align: middle; margin-inline-end: 4px; }
+.cty-list, .cty-sug { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.cty-list:empty, .cty-sug:empty { display: none; }
+.cty-btn { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); border-radius: var(--pill); padding: 4px 12px; font-size: 18px; min-height: 40px; }
+.cty-btn.sug { border-style: dashed; border-color: var(--sky); color: var(--sky-d); }
+.cty-sug .lbl2 { font-size: 16px; color: var(--ink2); align-self: center; }
+#f-cty .chip { gap: 6px; }
+#f-cty .chip button { border: 0; background: none; padding: 0 2px; color: inherit; }
+
+/* ---------- Step 24: currency switch in the trip header ---------- */
+.cur-sw { display: inline-flex; background: rgba(255,255,255,.6); border-radius: var(--pill); padding: 3px; gap: 2px; border: 1.5px solid var(--line); }
+.cur-sw button { border: 0; background: none; border-radius: var(--pill); min-width: 40px; min-height: 34px; padding: 0 10px; font-weight: 700; color: var(--ink2); font-size: var(--fs-sm); }
+.cur-sw button[aria-pressed=true] { background: var(--mint); color: var(--mint-d); }
+:root[data-theme=dark] .cur-sw { background: rgba(255,255,255,.06); }
+@media (prefers-color-scheme: dark) { :root[data-theme=auto] .cur-sw { background: rgba(255,255,255,.06); } }
+.view-note { font-size: 16px; color: var(--ink2); }
+.toggle.three { display: flex; }
+.toggle.three button { flex: 1; white-space: nowrap; padding: 6px 8px; }
+
+/* ---------- Step 24: receipt scan ---------- */
+.scan-bar { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; margin: 0 0 var(--s3);
+  border: 1.5px solid var(--sky); border-radius: var(--r-sm); background: linear-gradient(135deg, var(--sky-chip), var(--sky-soft)); color: var(--sky-d); font-weight: 700; }
+.scan-bar:disabled { opacity: .6; }
+.scan-st { border-radius: var(--r-sm); background: var(--sky-soft); padding: 8px 12px; margin: 0 0 var(--s3); font-size: 17px; color: var(--ink2); }
+.scan-st .prog { height: 8px; border-radius: 9px; background: var(--line); overflow: hidden; margin-top: 6px; }
+.scan-st .prog i { display: block; height: 100%; width: 0; background: var(--sky-btn); transition: width .2s; }
+.scan-st.done { background: #FFFBEB; color: #78350F; }
+:root[data-theme=dark] .scan-st.done { background: #3A2C0A; color: #FCD34D; }
+@media (prefers-color-scheme: dark) { :root[data-theme=auto] .scan-st.done { background: #3A2C0A; color: #FCD34D; } }
+.ocr, .ocr:focus { border-color: #F59E0B !important; box-shadow: 0 0 0 2px rgba(245,158,11,.25); }

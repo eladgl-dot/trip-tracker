@@ -446,3 +446,117 @@ test('pending deletes: a failing commit does not stop the others', () => {
   p.flush();
   assert.deepEqual(done, ['y']);
 });
+
+// ---- Step 24: countries, view currency, receipt reading
+test('countries: names in Hebrew/English/Russian from the code', () => {
+  assert.equal(L.countryName('IT', 'he'), 'איטליה');
+  assert.equal(L.countryName('IT', 'en'), 'Italy');
+  assert.equal(L.countryName('IT', 'ru'), 'Италия');
+  assert.equal(L.countryName('ZZ', 'he'), '');
+  assert.ok(L.COUNTRY_CODES.includes('BG') && !L.COUNTRY_CODES.includes('EU'));
+});
+test('countries: clean list keeps known codes once, max 10', () => {
+  assert.deepEqual(L.cleanCountries(['it', 'IT', 'ZZ', 'FR', null]), ['IT', 'FR']);
+  assert.equal(L.cleanCountries(L.COUNTRY_CODES).length, L.MAX_COUNTRIES);
+  assert.deepEqual(L.cleanCountries(undefined), []);
+});
+test('countries: suggested from trip name, place and expense addresses', () => {
+  assert.deepEqual(L.suggestCountries(['איטליה 2026', 'רומא']), ['IT']);
+  assert.deepEqual(L.suggestCountries(['Trip to France', 'Bar Centrale, Via Roma 12, Firenze, Italia']), ['FR', 'IT']);
+  assert.deepEqual(L.suggestCountries(['סופיה', 'רחוב ויטושה, סופיה, בולגריה']), ['BG']);
+  assert.deepEqual(L.suggestCountries(['איטליה'], ['IT']), []); // already picked
+  assert.deepEqual(L.suggestCountries(['Oman trip to Romania']), ['OM', 'RO']);
+  assert.deepEqual(L.suggestCountries(['Germany', 'Romantic weekend']), ['DE']); // "Oman" inside "Romantic" is not a match
+});
+test('countries: group trips by country, several countries together, none last', () => {
+  const trips = [
+    { id: 'a', startDate: '2026-01-01', countries: ['IT'] },
+    { id: 'b', startDate: '2025-01-01', countries: ['BG'] },
+    { id: 'c', startDate: '2024-01-01', countries: ['FR', 'IT'] },
+    { id: 'd', startDate: '2023-01-01' },
+    { id: 'e', startDate: '2022-01-01', countries: ['IT'] }];
+  const g = L.groupTrips(trips, 'country');
+  assert.deepEqual(g.map(x => x.key), ['country:IT', 'country:BG', 'country:*', 'country:']); // A–Z by Hebrew name
+  assert.deepEqual(g[0].trips.map(t => t.id), ['a', 'e']);
+  assert.equal(g[1].country, 'BG'); assert.equal(g[0].label, 'איטליה');
+  assert.equal(g[2].label, L.MANY_COUNTRIES); assert.equal(g[3].label, L.NO_COUNTRY);
+});
+test('view currency: rate of the expense day, else the day before, else after, else fallback', () => {
+  const m = { '2026-10-01': 3.5, '2026-10-02': 3.4, '2026-10-05': 3.3 };
+  assert.equal(L.rateOnDate(m, '2026-10-02', 9), 3.4);
+  assert.equal(L.rateOnDate(m, '2026-10-04', 9), 3.4); // weekend: last working day
+  assert.equal(L.rateOnDate(m, '2026-09-20', 9), 3.5); // before the first known day
+  assert.equal(L.rateOnDate({}, '2026-10-04', 9), 9);
+  assert.equal(L.rateOnDate(null, '', 2), 2);
+});
+test('view currency: expenses converted with their own day rate', () => {
+  const m = { '2026-10-03': 4, '2026-10-04': 3.975 };
+  const list = [ex('א', 10, { date: '2026-10-03' }), ex('ב', 72, { date: '2026-10-04' }), inc('א', 5)];
+  const v = L.toViewCurrency(list, m, 3.7);
+  assert.deepEqual(v.map(e => e.convertedAmount), [40, 286.2, 20]); // income dated 28.9 → first known rate (4)
+  assert.equal(list[0].convertedAmount, 10); // original untouched
+  assert.equal(L.toViewCurrency(list, m, 1, true), list); // same currency: no change
+});
+test('view currency: days still missing a rate', () => {
+  const m = { '2026-10-03': 4 };
+  assert.deepEqual(L.rateRange([{ date: '2026-10-05' }, { date: '2026-10-01' }, { date: '' }], '2026-11-17'), { from: '2026-10-01', to: '2026-10-05' });
+  assert.equal(L.rateRange([{ date: '2027-01-01' }], '2026-11-17'), null); // future only: today's rate
+  assert.equal(L.rateRange([], '2026-11-17'), null);
+  assert.equal(L.hasRatesFor(m, { from: '2026-10-03', to: '2026-10-03' }), true);
+  assert.equal(L.hasRatesFor(m, { from: '2026-10-01', to: '2026-10-05' }), false);
+});
+test('receipt: Italian bar receipt', () => {
+  const r = L.parseReceipt(`BAR CENTRALE\nVia Roma 12, Firenze\n04/10/2026 13:42\n2 x Cappuccino 7,00\n1 x Cornetto 3,00\nTOTALE EUR 10,00\nCONTANTI 20,00\nRESTO 10,00`, { currency: 'ILS' });
+  assert.equal(r.amount, 10); assert.equal(r.currency, 'EUR'); assert.equal(r.date, '2026-10-04');
+  assert.equal(r.details, 'BAR CENTRALE'); assert.equal(r.category, 'מסעדות ובתי קפה');
+});
+test('receipt: Hebrew supermarket, total on the next line, thousands', () => {
+  const r = L.parseReceipt(`שופרסל דיל\nקבלה מס 4471\n12.11.26\nחלב 6.90\nסה"כ לתשלום\n1,234.50 ₪`, { currency: 'EUR' });
+  assert.equal(r.amount, 1234.5); assert.equal(r.currency, 'ILS'); assert.equal(r.date, '2026-11-12');
+  assert.equal(r.details, 'שופרסל דיל'); assert.equal(r.category, 'סופרמרקט ומצרכים');
+});
+test('receipt: Russian, no currency sign → trip currency', () => {
+  const r = L.parseReceipt(`ООО Такси Город\n2026-03-07\nИТОГО: 850.00`, { currency: 'EUR' });
+  assert.equal(r.amount, 850); assert.equal(r.currency, 'EUR'); assert.equal(r.date, '2026-03-07');
+  assert.equal(r.category, 'מוניות והסעות');
+});
+test('receipt: no total word → biggest amount; nothing found → empty', () => {
+  const r = L.parseReceipt(`MUSEO DEGLI UFFIZI\nBiglietto intero 25.00\nPrenotazione 4.00\n29.00\nTel 055 123456`, { currency: 'EUR' });
+  assert.equal(r.amount, 29); assert.equal(r.category, 'מוזיאונים ותרבות');
+  const n = L.parseReceipt('~~ ### ~~', { currency: 'EUR' });
+  assert.equal(n.amount, null); assert.equal(n.date, ''); assert.equal(n.details, ''); assert.equal(n.currency, 'EUR');
+});
+test('receipt: OCR noise and US dates', () => {
+  const r = L.parseReceipt(`Starbucks\n11/25/2026\nSubtotal $ 8.40\nTax 0.67\nTotal $ 9.07`, { currency: 'EUR' });
+  assert.equal(r.amount, 9.07); assert.equal(r.currency, 'USD'); assert.equal(r.date, '2026-11-25');
+  assert.equal(L.parseReceipt('Total 32/13/2026 5.00').date, ''); // impossible date ignored
+});
+test('trip theme: only light, dark or auto', () => {
+  assert.equal(L.tripTheme({ theme: 'dark' }), 'dark');
+  assert.equal(L.tripTheme({ theme: 'auto' }), 'auto');
+  assert.equal(L.tripTheme({}), 'light');
+  assert.equal(L.tripTheme({ theme: 'x' }), 'light');
+});
+test('review 1.19: view currency must be a known code different from the input currency', () => {
+  assert.equal(L.viewCurrencyOf({ defaultCurrency: 'EUR', viewCurrency: 'ILS' }), 'ILS');
+  assert.equal(L.viewCurrencyOf({ defaultCurrency: 'EUR', viewCurrency: 'EUR' }), '');
+  assert.equal(L.viewCurrencyOf({ defaultCurrency: 'EUR', viewCurrency: '"><img src=x onerror=alert(1)>' }), '');
+  assert.equal(L.viewCurrencyOf({ defaultCurrency: 'EUR' }), '');
+});
+test('review 1.19: days after the last known rate use today\'s rate', () => {
+  assert.equal(L.rateOnDate({ '2026-10-01': 3.5 }, '2026-12-01', 3.7), 3.7);
+  assert.equal(L.rateOnDate({ '2026-10-01': 3.5, '2026-10-02': 3.4 }, '2026-10-02', 3.7), 3.4);
+});
+test('review 1.19: a hole of more than 5 days in the stored rates means fetch again', () => {
+  const m = { '2026-01-01': 1, '2026-01-02': 1, '2026-03-30': 1, '2026-03-31': 1 };
+  assert.equal(L.hasRatesFor(m, { from: '2026-01-01', to: '2026-03-31' }), false);
+  assert.equal(L.hasRatesFor({ '2026-01-02': 1, '2026-01-05': 1, '2026-01-06': 1 }, { from: '2026-01-02', to: '2026-01-06' }), true); // weekend is fine
+});
+test('review 1.19: receipt totals that mention VAT, and paid amounts on the same line', () => {
+  assert.equal(L.parseReceipt('Shop\nTOTAL (incl. VAT) 21.00\nCard 21.00').amount, 21);
+  assert.equal(L.parseReceipt('Shop\nTotal 12.50 Paid 20.00').amount, 12.5);
+  assert.equal(L.parseReceipt('Shop\nסה"כ כולל מע"מ 84.90\nמזומן 100.00').amount, 84.9);
+  assert.equal(L.parseReceipt('Shop\nSubtotal 10.00\nTotale 12.20\nPagato 50,00').amount, 12.2);
+  assert.equal(L.parseReceipt('Currency exchange office\nTotal 30.00').amount, 30);
+  assert.equal(L.parseReceipt('Eurospin\nTotale 9.99', { currency: 'ILS' }).currency, 'ILS'); // "Euro" inside a shop name is not €
+});

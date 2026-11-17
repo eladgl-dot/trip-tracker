@@ -271,7 +271,7 @@ export function allTags(trips) {
 export function tripMatches(t, query, mine) {
   const q = (query || '').trim().toLowerCase();
   if (!q) return true;
-  const fields = [t.name, t.location, ...(t.tags || []), ...(mine ? t.participants || [] : [])];
+  const fields = [t.name, t.location, ...(t.tags || []), ...cleanCountries(t.countries).flatMap(c => [countryName(c, 'he'), countryName(c, 'en')]), ...(mine ? t.participants || [] : [])];
   return fields.some(f => (f || '').toLowerCase().includes(q));
 }
 export function filterTrips(trips, { mine = new Set(), scope = 'mine', tag = '', query = '' } = {}) {
@@ -283,6 +283,17 @@ export function groupTrips(trips, mode, filterTag = '') {
   const sorted = sortTrips(trips);
   if (!sorted.length) return [];
   if (mode === 'none') return [{ key: 'all', label: '', trips: sorted }];
+  if (mode === 'country') { // one country → its group; several → "כמה מדינות"; none → last
+    const cm = new Map();
+    for (const t of sorted) {
+      const cs = cleanCountries(t.countries), k = cs.length > 1 ? '*' : cs[0] || '';
+      if (!cm.has(k)) cm.set(k, []);
+      cm.get(k).push(t);
+    }
+    const rank = k => k === '' ? 2 : k === '*' ? 1 : 0;
+    return [...cm.keys()].sort((a, b) => rank(a) - rank(b) || countryName(a).localeCompare(countryName(b), 'he'))
+      .map(k => ({ key: 'country:' + k, label: k === '*' ? MANY_COUNTRIES : k ? countryName(k) || k : NO_COUNTRY, ...(k && k !== '*' ? { country: k } : {}), trips: cm.get(k) }));
+  }
   const map = new Map();
   for (const t of sorted) {
     const k = mode === 'tag' ? (filterTag && hasTag(t, filterTag) ? filterTag : t.tags?.[0] || '') : (t.startDate || '').slice(0, 4);
@@ -416,4 +427,175 @@ export function pendingDeletes(ms = UNDO_MS, timers = { set: (f, t) => setTimeou
     flush() { [...map.keys()].forEach(finish); },
     get size() { return map.size; },
   };
+}
+
+// ---------- Step 24: trip theme ----------
+export const THEMES = ['light', 'dark', 'auto'];
+export const tripTheme = t => THEMES.includes(t?.theme) ? t.theme : 'light';
+
+// ---------- Step 24: countries (names come from the browser, flags from app/flags/<code>.svg) ----------
+export const COUNTRY_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CP CR CU CV CW CX CY CZ DE DG DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU IC ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PC PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW'.split(' ');
+export const MAX_COUNTRIES = 10;
+export const MANY_COUNTRIES = 'כמה מדינות';
+export const NO_COUNTRY = 'ללא מדינה';
+const regionNames = new Map();
+export function countryName(code, lang = 'he') {
+  if (!COUNTRY_CODES.includes(code)) return '';
+  try {
+    if (!regionNames.has(lang)) regionNames.set(lang, new Intl.DisplayNames([lang], { type: 'region' }));
+    const n = regionNames.get(lang).of(code);
+    return n && n !== code ? n : '';
+  } catch { return ''; }
+}
+export const flagUrl = code => `./flags/${String(code).toLowerCase()}.svg`;
+export function cleanCountries(list) {
+  const out = [];
+  for (const c of Array.isArray(list) ? list : []) {
+    const k = String(c || '').toUpperCase();
+    if (COUNTRY_CODES.includes(k) && !out.includes(k)) out.push(k);
+  }
+  return out.slice(0, MAX_COUNTRIES);
+}
+// Country names in the languages people write and OpenStreetMap answers in; matched as whole words.
+// Hebrew may have a one/two-letter prefix (לאיטליה, ובצרפת).
+const SUGGEST_LANGS = ['he', 'en', 'ru', 'it', 'es', 'fr', 'de'];
+let nameIndex = null;
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function countryPatterns() {
+  if (nameIndex) return nameIndex;
+  nameIndex = [];
+  for (const code of COUNTRY_CODES) {
+    const names = new Set(SUGGEST_LANGS.map(l => countryName(code, l)).filter(n => n && [...n].length >= 4));
+    for (const n of names) {
+      const he = /[֐-׿]/.test(n);
+      nameIndex.push({ code, re: new RegExp(`(?<!\\p{L})${he ? '(?:[ובלמהשכ]{1,2})?' : ''}${reEsc(n)}(?!\\p{L})`, 'iu') });
+    }
+  }
+  return nameIndex;
+}
+export function suggestCountries(texts, picked = []) {
+  const found = [];
+  (texts || []).forEach((txt, ti) => {
+    if (!txt) return;
+    for (const { code, re } of countryPatterns()) {
+      const m = re.exec(txt);
+      if (m && !picked.includes(code)) found.push({ code, pos: ti * 1e6 + m.index });
+    }
+  });
+  found.sort((a, b) => a.pos - b.pos);
+  return [...new Set(found.map(f => f.code))];
+}
+
+// ---------- Step 24: view currency (each expense converted with the rate of its own day) ----------
+// map = { 'YYYY-MM-DD': rate } from the trip currency to the view currency (working days only).
+// The view currency of a trip: only a known code that differs from the input currency (the value comes from the shared database).
+export const viewCurrencyOf = t => {
+  const v = t?.viewCurrency;
+  return v && v !== t.defaultCurrency && CURRENCIES.some(c => c.code === v) ? v : '';
+};
+export function rateOnDate(map, date, fallback) {
+  if (!map) return fallback;
+  if (map[date] > 0) return map[date];
+  const days = Object.keys(map).filter(d => map[d] > 0).sort();
+  if (!days.length) return fallback;
+  if (date > days[days.length - 1] && fallback > 0) return fallback; // newer than every stored rate: today's rate
+  let best = null;
+  for (const d of days) { if (d <= date) best = d; else break; }
+  return map[best ?? days[0]];
+}
+export function toViewCurrency(expenses, map, fallback, same = false) {
+  if (same) return expenses;
+  return expenses.map(e => { const r = rateOnDate(map, e.date, fallback); return { ...e, viewRate: r, convertedAmount: round2(e.convertedAmount * r) }; });
+}
+// Dates that need a past rate (future days use today's rate).
+export function rateRange(expenses, today) {
+  const ds = expenses.map(e => e.date).filter(d => d && d <= today).sort();
+  return ds.length ? { from: ds[0], to: ds[ds.length - 1] } : null;
+}
+// The stored map covers the range when it has a rate on or before the first day and one on or after the last day.
+// Also false when the stored days inside the range have a hole longer than a long weekend (two separate fetches merged).
+export function hasRatesFor(map, range) {
+  if (!range) return true;
+  const days = Object.keys(map || {}).sort();
+  if (!days.length) return false;
+  if (!(days[0] <= range.from && days[days.length - 1] >= range.to)) return false;
+  const inside = days.filter(d => d >= range.from && d <= range.to);
+  for (let i = 1; i < inside.length; i++) if ((Date.parse(inside[i]) - Date.parse(inside[i - 1])) / 864e5 > 6) return false;
+  return true;
+}
+
+// ---------- Step 24: reading a receipt (text from the phone's OCR) ----------
+const TOTAL_WORDS = /(סה["״']?\s?כ|סך\s?הכל|לתשלום|total|totale|importe|importo|summe|gesamt|итого|итог|к\s?оплате|всего|montant|suma|razem|celkem|összesen|toplam|amount\s?due|to\s?pay)/i;
+// A line that STARTS with one of these is not the total (subtotal, tax, cash handed over, change, card).
+const NOT_TOTAL = /^[^\p{L}\p{N}]*(sub\s?-?total|subtotale|iva|vat|tax|mwst|מע["״']?מ|ндс|resto|change|עודף|contanti|cash|מזומן|сдача|pagato|paid|card|carta|bancomat|אשראי|наличные)(?!\p{L})/iu;
+const SIGNS = [[/€|\bEUR\b|\beuros?\b/i, 'EUR'], [/₪|ש["״']ח|\bNIS\b|\bILS\b/i, 'ILS'], [/£|\bGBP\b/i, 'GBP'], [/\bUSD\b|\$\s?\d|\d\s?\$/i, 'USD'],
+  [/\bCHF\b/i, 'CHF'], [/₺|\bTRY\b/, 'TRY'], [/฿|\bTHB\b/i, 'THB'], [/\d\s?лв|лв\.?\s?\d|\bBGN\b/i, 'BGN'], [/Kč|\bCZK\b/i, 'CZK'],
+  [/zł|\bPLN\b/i, 'PLN'], [/\bFt\b|\bHUF\b/, 'HUF'], [/\bRON\b|\blei\b/i, 'RON'], [/₾|\bGEL\b/i, 'GEL'], [/\bAED\b/i, 'AED'],
+  [/\bJOD\b/i, 'JOD'], [/\bJPY\b|円/i, 'JPY'], [/₹|\bINR\b/i, 'INR'], [/₫|\bVND\b/i, 'VND']];
+const CAT_WORDS = [
+  [/gelat|ice\s?cream|גלידה|мороженое/i, 'אוכל רחוב וגלידות'],
+  [/caff[eè]|cafe|café|coffee|cappuccino|espresso|starbucks|\bbar\b|ristorante|restaurant|pizzeria|trattoria|osteria|bistro|מסעדה|קפה|פיצה|кафе|ресторан|кофе/i, 'מסעדות ובתי קפה'],
+  [/supermerc|supermarket|conad|\bcoop\b|carrefour|lidl|aldi|\bspar\b|billa|kaufland|\bmarket\b|שופרסל|רמי לוי|סופר|супермаркет|магазин/i, 'סופרמרקט ומצרכים'],
+  [/taxi|uber|\bbolt\b|מונית|такси/i, 'מוניות והסעות'],
+  [/hotel|albergo|hostel|b&b|airbnb|מלון|отель|гостиница/i, 'לינה ומלונות'],
+  [/muse[oiu]|uffizi|מוזיאון|музей/i, 'מוזיאונים ותרבות'],
+  [/farmacia|pharma|apotheke|בית מרקחת|аптека/i, 'בריאות ובית מרקחת'],
+  [/benzin|\bfuel\b|petrol|diesel|gasolin|carburant|\besso\b|\bshell\b|\beni\b|דלק|бензин|азс/i, 'דלק'],
+  [/parking|parcheggio|חניה|парковка/i, 'חניה וכבישי אגרה'],
+  [/trenitalia|\btreno\b|\btrain\b|\bbahn\b|\bmetro\b|\bbus\b|רכבת|אוטובוס|поезд|метро|автобус/i, 'תחבורה ציבורית'],
+];
+// "1.234,50" / "1,234.50" / "10,00" / "9.07" → number. The last . or , followed by 1–2 digits is the decimal point.
+const AMOUNT_RE = /\d{1,3}(?:[.,\s]\d{3})+(?:[.,]\d{1,2})?(?!\d)|\d+(?:[.,]\d{1,2})?(?!\d)/g;
+function toNumber(s) {
+  const m = /[.,](\d{1,2})$/.exec(s);
+  const whole = (m ? s.slice(0, m.index) : s).replace(/[.,\s]/g, '');
+  return Number(whole + (m ? '.' + m[1] : ''));
+}
+const stripDates = line => line.replace(/\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/g, ' ').replace(/\d{1,2}:\d{2}(:\d{2})?/g, ' ');
+function amountsIn(line, decimalsOnly) {
+  const out = [];
+  for (const m of stripDates(line).matchAll(AMOUNT_RE)) {
+    if (decimalsOnly && !/[.,]\d{2}$/.test(m[0])) continue;
+    const n = toNumber(m[0]);
+    if (n > 0 && n < 1e7) out.push(n);
+  }
+  return out;
+}
+function findDate(text) {
+  const mk = (y, mo, d) => {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+    const s = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s ? s : '';
+  };
+  const iso = /(20\d{2})-(\d{1,2})-(\d{1,2})/.exec(text);
+  if (iso) { const r = mk(+iso[1], +iso[2], +iso[3]); if (r) return r; }
+  for (const m of text.matchAll(/(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)/g)) {
+    let [a, b, y] = [+m[1], +m[2], +m[3]];
+    if (y < 100) y += 2000;
+    const r = b > 12 && a <= 12 ? mk(y, a, b) : mk(y, b, a); // day first, unless that can't be (US style)
+    if (r) return r;
+  }
+  return '';
+}
+export function parseReceipt(text, { currency = 'EUR', categories = DEFAULT_CATEGORIES } = {}) {
+  text = String(text || '');
+  const lines = text.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  // amount: the biggest number on a "total" line (or the line after it); otherwise the biggest number with cents
+  const cands = [];
+  lines.forEach((l, i) => {
+    const m = TOTAL_WORDS.exec(l);
+    if (!m || NOT_TOTAL.test(l)) return;
+    const here = amountsIn(l.slice(m.index + m[0].length), false); // the first number after the word ("Total 12.50 Paid 20.00" → 12.50)
+    const next = here.length ? here : amountsIn(lines[i + 1] || '', false);
+    if (next.length) cands.push(next[0]);
+  });
+  if (!cands.length) lines.forEach(l => { if (!NOT_TOTAL.test(l) && !/tel|phone|טל|тел|p\.?\s?iva/i.test(l)) cands.push(...amountsIn(l, true)); });
+  const amount = cands.length ? Math.max(...cands) : null;
+  let cur = '';
+  for (const [re, code] of SIGNS) if (re.test(text) && CURRENCIES.some(c => c.code === code)) { cur = code; break; }
+  const letters = l => (l.match(/\p{L}/gu) || []).length;
+  const details = (lines.find(l => letters(l) >= 3 && letters(l) >= l.replace(/\s/g, '').length * 0.6) || '').slice(0, 60);
+  let category = '';
+  for (const [re, name] of CAT_WORDS) if (re.test(text) && categories.includes(name)) { category = name; break; }
+  return { amount, currency: cur || currency, date: findDate(text), details, category };
 }

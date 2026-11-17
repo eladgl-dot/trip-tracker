@@ -4,11 +4,11 @@ const VERSION = 'tt-v' + self.TT_VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './config.js', './version.js', './css/app.css',
   './js/app.js', './js/logic.js', './js/ui.js', './js/charts.js', './js/store.js',
-  './js/store-firebase.js', './js/store-demo.js', './js/pin.js', './js/rates.js', './js/geo.js', './js/photo.js',
+  './js/store-firebase.js', './js/store-demo.js', './js/pin.js', './js/rates.js', './js/geo.js', './js/photo.js', './js/ocr.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
-// Third-party files that are safe to keep (versioned URLs): Firebase SDK and Google Fonts.
-const CACHE_CROSS = /^https:\/\/(www\.gstatic\.com\/firebasejs\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
+// Third-party files that are safe to keep (versioned URLs): Firebase SDK, Google Fonts, receipt reader + its language files.
+const CACHE_CROSS = /^https:\/\/(www\.gstatic\.com\/firebasejs\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/|cdn\.jsdelivr\.net\/npm\/(tesseract\.js(-core)?@\d|@tesseract\.js-data\/))/;
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
