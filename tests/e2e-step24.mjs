@@ -94,7 +94,13 @@ Via Roma 12, Firenze
 1 x Cornetto      3.00
 TOTALE EUR       10.00</pre></body>`);
   const receipt = await rp.screenshot({ type: 'png' }); await rp.close();
-  await page.setInputFiles('#x-scan-in', { name: 'receipt.png', mimeType: 'image/png', buffer: receipt });
+  await page.click('#x-scan');
+  ok('scan bar opens a menu: camera / gallery', await page.locator('#x-scan-menu').isVisible() && await page.locator('#x-scan-menu [data-scan]').count() === 2);
+  ok('camera choice opens the camera directly', await page.locator('#x-scan-cam').getAttribute('capture') === 'environment' && await page.locator('#x-scan-gal').getAttribute('capture') === null);
+  await page.locator('.sheet').screenshot({ path: `${OUT}/24-scan-menu.png` });
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('[data-scan=gal]')]);
+  ok('menu closes after a choice', await page.locator('#x-scan-menu').isHidden());
+  await chooser.setFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: receipt });
   await page.waitForSelector('#x-scan-st.done', { timeout: 120000 });
   const stTxt = await page.locator('#x-scan-st').textContent();
   ok('scan finished with filled fields', stTxt.includes('מולא מהקבלה'), stTxt);

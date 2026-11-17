@@ -1211,8 +1211,12 @@ function expenseSheet(st, existing, type = 'expense') {
   const r = { rate: existing ? existing.exchangeRateToTripDefault : 1, source: existing ? 'saved' : 'live', at: 0, manual: false };
   const m = modal(`
     <h2>${existing ? 'עריכת תנועה' : 'הוספת תנועה'}</h2>
-    ${existing ? '' : `<button type="button" class="scan-bar" id="x-scan"><span aria-hidden="true">📷</span> סריקת קבלה</button>
-      <input type="file" id="x-scan-in" accept="image/*" hidden>
+    ${existing ? '' : `<button type="button" class="scan-bar" id="x-scan" aria-expanded="false" aria-controls="x-scan-menu"><span aria-hidden="true">📷</span> סריקת קבלה</button>
+      <div class="scan-menu hidden" id="x-scan-menu" role="menu">
+        <button type="button" role="menuitem" data-scan="cam">📷 צילום עכשיו</button>
+        <button type="button" role="menuitem" data-scan="gal">🖼️ מהגלריה</button></div>
+      <input type="file" id="x-scan-cam" accept="image/*" capture="environment" hidden>
+      <input type="file" id="x-scan-gal" accept="image/*" hidden>
       <div class="scan-st hidden" id="x-scan-st" aria-live="polite"></div>`}
     <form novalidate>
       <div class="type-toggle" role="group" aria-label="סוג תנועה">
@@ -1406,15 +1410,18 @@ function expenseSheet(st, existing, type = 'expense') {
   // ---- receipt scan (new expense only): read the photo on the phone, fill the form, the user checks and saves
   const scanBtn = $('#x-scan', el);
   if (scanBtn) {
-    const scanIn = $('#x-scan-in', el), stBox = $('#x-scan-st', el);
+    const stBox = $('#x-scan-st', el), menu = $('#x-scan-menu', el);
     const mark = f => { f.classList.add('ocr'); f.addEventListener('input', () => f.classList.remove('ocr'), { once: true }); f.addEventListener('change', () => f.classList.remove('ocr'), { once: true }); };
     const status = (pct, text) => {
       stBox.classList.remove('hidden', 'done');
       stBox.innerHTML = `${esc(text)}<div class="prog"><i style="width:${Math.round(pct * 100)}%"></i></div>`;
     };
-    scanBtn.onclick = () => scanIn.click();
-    scanIn.onchange = async () => {
-      const file = scanIn.files[0]; scanIn.value = '';
+    // tap the bar → small menu: camera now (opens the camera directly) or a photo from the gallery
+    const showMenu = on => { menu.classList.toggle('hidden', !on); scanBtn.setAttribute('aria-expanded', on); };
+    scanBtn.onclick = () => showMenu(menu.classList.contains('hidden'));
+    $$('[data-scan]', menu).forEach(b => b.onclick = () => { showMenu(false); $(b.dataset.scan === 'cam' ? '#x-scan-cam' : '#x-scan-gal', el).click(); });
+    const onScan = async ev => {
+      const input = ev.target, file = input.files[0]; input.value = '';
       if (!file) return;
       scanBtn.disabled = true;
       const before = { amt: amt.value, cur: cur.value, date: $('#x-date', el).value }; // fields the user changes while it reads stay theirs
@@ -1442,6 +1449,8 @@ function expenseSheet(st, existing, type = 'expense') {
       stBox.classList.remove('hidden'); stBox.classList.add('done');
       stBox.textContent = filled.length ? `🟨 מולא מהקבלה: ${filled.join(', ')} – בדקו את השדות המסומנים ושמרו` : '⚠️ לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.';
     };
+    $('#x-scan-cam', el).onchange = onScan;
+    $('#x-scan-gal', el).onchange = onScan;
   }
 
   // ---- save / delete

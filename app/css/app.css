@@ -520,3 +520,8 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 :root[data-theme=dark] .scan-st.done { background: #3A2C0A; color: #FCD34D; }
 @media (prefers-color-scheme: dark) { :root[data-theme=auto] .scan-st.done { background: #3A2C0A; color: #FCD34D; } }
 .ocr, .ocr:focus { border-color: #F59E0B !important; box-shadow: 0 0 0 2px rgba(245,158,11,.25); }
+/* receipt scan: choose camera or gallery (owner 1.20) */
+.scan-menu { display: flex; flex-direction: column; gap: 4px; width: min(260px, 100%); margin: calc(-1 * var(--s2)) auto var(--s3); padding: 6px;
+  background: var(--card); border: 1.5px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow-pop); }
+.scan-menu button { border: 0; background: none; color: var(--ink); text-align: start; min-height: 48px; padding: 8px 14px; border-radius: 12px; font-weight: 600; }
+.scan-menu button:hover, .scan-menu button:focus-visible { background: var(--sky-soft); }
