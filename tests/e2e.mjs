@@ -93,7 +93,7 @@ try {
   const msg2 = await page.evaluate(() => decodeURIComponent((window.opened[1] || '').split('text=')[1] || ''));
   ok('with password: message has 🔑 סיסמה: 1234', msg2.includes('🔑 סיסמה: 1234') && msg2.includes('#/trip/'));
   await page.goto(BASE + '?demo#/'); await page.waitForSelector('.trip-card .lock');
-  ok('lock text: "עוד X ימים צריך להזין את הסיסמא שוב"', /עוד \d+ ימים צריך להזין את הסיסמא שוב/.test(await page.locator('.trip-card .lock').textContent()));
+  ok('lock text: "עוד X ימים צריך להזין את הסיסמה שוב"', /עוד \d+ ימים צריך להזין את הסיסמה שוב/.test(await page.locator('.trip-card .lock').textContent()));
   await page.locator('.trip-card').click(); await page.waitForSelector('#stats .stat');
 
   // charts

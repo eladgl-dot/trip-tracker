@@ -1,6 +1,7 @@
 // Receipt reading on the phone (Tesseract.js, owner Step 24: offline, no server).
 // The library and the language files (~10 MB) download on the first scan; after that they come from the
 // phone (service-worker cache + Tesseract's own IndexedDB copy), so scanning works on a plane too.
+import { t } from './i18n.js';
 const LIB = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/';
 const CORE = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1';
 const LANGS = ['eng', 'heb', 'rus']; // Latin receipts (Italian, French…), Hebrew, Cyrillic (Russian, Bulgarian)
@@ -53,13 +54,13 @@ async function prepare(file) {
 
 // progress(fraction 0..1, text) while it works. Returns the receipt text.
 export async function readReceipt(file, progress = () => {}) {
-  progress(0.02, 'מכין את התמונה…');
+  progress(0.02, t('מכין את התמונה…'));
   const canvas = await prepare(file);
   const first = !worker;
-  progress(0.05, first ? 'טוען את קבצי הזיהוי… (בפעם הראשונה ~10MB)' : 'קורא את הקבלה…');
+  progress(0.05, first ? t('טוען את קבצי הזיהוי… (בפעם הראשונה ~10MB)') : t('קורא את הקבלה…'));
   onStep = m => {
-    if (m.status === 'recognizing text') progress(0.3 + 0.7 * (m.progress || 0), 'קורא את הקבלה…');
-    else if (/load|initializ/.test(m.status || '')) progress(0.05 + 0.25 * (m.progress || 0), first ? 'טוען את קבצי הזיהוי… (בפעם הראשונה ~10MB)' : 'מכין…');
+    if (m.status === 'recognizing text') progress(0.3 + 0.7 * (m.progress || 0), t('קורא את הקבלה…'));
+    else if (/load|initializ/.test(m.status || '')) progress(0.05 + 0.25 * (m.progress || 0), first ? t('טוען את קבצי הזיהוי… (בפעם הראשונה ~10MB)') : t('מכין…'));
   };
   try {
     const w = await getWorker();

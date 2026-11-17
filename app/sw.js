@@ -4,7 +4,7 @@ const VERSION = 'tt-v' + self.TT_VERSION;
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './config.js', './version.js', './css/app.css',
   './js/app.js', './js/logic.js', './js/ui.js', './js/charts.js', './js/store.js',
-  './js/store-firebase.js', './js/store-demo.js', './js/pin.js', './js/rates.js', './js/geo.js', './js/photo.js', './js/ocr.js',
+  './js/store-firebase.js', './js/store-demo.js', './js/pin.js', './js/rates.js', './js/geo.js', './js/photo.js', './js/ocr.js', './js/i18n.js', './js/i18n-dict.js',
   './icons/icon-192.png', './icons/icon-512.png'
 ];
 // Third-party files that are safe to keep (versioned URLs): Firebase SDK, Google Fonts, receipt reader + its language files.

@@ -1,15 +1,20 @@
 // DOM helpers: escaping, modals, toasts, confirm.
+import { t as tr, locale } from './i18n.js';
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+// Dates are always dd/mm/yyyy (owner, every language); only weekday names follow the language.
+// opts.weekday ('long' | 'short') adds the day name; a truthy opts.year gives dd/mm/yyyy, otherwise dd/mm.
 export function formatDate(iso, opts = { day: '2-digit', month: '2-digit', year: 'numeric' }) {
   if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString('he-IL', opts);
+  const [y, m, d] = iso.split('-');
+  const wd = opts.weekday ? new Date(iso + 'T12:00:00').toLocaleDateString(locale(), { weekday: opts.weekday }) + ' ' : '';
+  return wd + (opts.year ? `${d}/${m}/${y}` : `${d}/${m}`);
 }
 export function dateRange(a, b) {
-  if (!a && !b) return 'ללא תאריכים';
+  if (!a && !b) return tr('ללא תאריכים');
   if (a && b) return `${formatDate(a, { day: '2-digit', month: '2-digit' })} – ${formatDate(b)}`;
   return formatDate(a || b);
 }
@@ -30,7 +35,7 @@ export function undoToast(msg, onUndo, ms) {
   const t = $('#toast');
   clearTimeout(toastTimer);
   t.className = 'toast on undo'; t.inert = false;
-  t.innerHTML = `<span class="t"></span><button type="button" class="undo-btn">↩ ביטול</button><i class="bar" aria-hidden="true" style="animation-duration:${ms}ms"></i>`;
+  t.innerHTML = `<span class="t"></span><button type="button" class="undo-btn">↩ ${tr('ביטול')}</button><i class="bar" aria-hidden="true" style="animation-duration:${ms}ms"></i>`;
   $('.t', t).textContent = msg;
   let done = false;
   $('.undo-btn', t).onclick = () => { if (done) return; done = true; t.className = 'toast'; onUndo(); };
@@ -71,9 +76,9 @@ export function modal(html, { sheet = false, label = '' } = {}) {
   return { el, close, result };
 }
 
-export function confirmBox(title, text, { ok = 'אישור', danger = false } = {}) {
+export function confirmBox(title, text, { ok = tr('אישור'), danger = false } = {}) {
   const m = modal(`<h2>${esc(title)}</h2><p class="muted">${esc(text)}</p>
-    <div class="row2"><button class="btn ghost" data-x>ביטול</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(ok)}</button></div>`, { label: title });
+    <div class="row2"><button class="btn ghost" data-x>${tr('ביטול')}</button><button class="btn ${danger ? 'danger' : 'primary'}" data-ok>${esc(ok)}</button></div>`, { label: title });
   m.el.querySelector('[data-x]').onclick = () => m.close(false);
   m.el.querySelector('[data-ok]').onclick = () => m.close(true);
   m.el.querySelector('[data-ok]').focus();
@@ -81,23 +86,23 @@ export function confirmBox(title, text, { ok = 'אישור', danger = false } = 
 }
 
 // A digits-only code prompt (trip PIN / admin code). check(code) -> true | false (async ok).
-export function codePrompt({ title, text, length, check, note = '', ok = 'כניסה', okClass = 'primary' }) {
+export function codePrompt({ title, text, length, check, note = '', ok = tr('כניסה'), okClass = 'primary' }) {
   const m = modal(`<h2 class="center">${esc(title)}</h2><p class="muted center">${esc(text)}</p>
     <form novalidate>
       <input class="code num" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
         maxlength="${length}" aria-label="${esc(text)}" required>
       <p class="err center" aria-live="polite"></p>
       ${note ? `<p class="muted center small">${esc(note)}</p>` : ''}
-      <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button class="btn ${okClass}">${esc(ok)}</button></div>
+      <div class="row2"><button type="button" class="btn ghost" data-x>${tr('ביטול')}</button><button class="btn ${okClass}">${esc(ok)}</button></div>
     </form>`, { label: title });
   const input = m.el.querySelector('input'), err = m.el.querySelector('.err');
   input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, length); err.textContent = ''; });
   m.el.querySelector('[data-x]').onclick = () => m.close(false);
   m.el.querySelector('form').onsubmit = async e => {
     e.preventDefault();
-    if (input.value.length !== length) { err.textContent = `יש להזין ${length} ספרות`; return; }
+    if (input.value.length !== length) { err.textContent = tr('יש להזין {n} ספרות', { n: length }); return; }
     if (await check(input.value)) m.close(true);
-    else { err.textContent = 'קוד שגוי, נסו שוב'; input.select(); m.el.classList.add('shake'); setTimeout(() => m.el.classList.remove('shake'), 400); }
+    else { err.textContent = tr('קוד שגוי, נסו שוב'); input.select(); m.el.classList.add('shake'); setTimeout(() => m.el.classList.remove('shake'), 400); }
   };
   setTimeout(() => input.focus(), 60);
   return m.result;
@@ -107,6 +112,6 @@ export function codePrompt({ title, text, length, check, note = '', ok = 'כני
 export function reportError(err) {
   console.error(err);
   const msg = String(err?.code || err?.message || err);
-  if (msg.includes('permission')) toast('אין הרשאה למסד הנתונים. האם חוקי Firestore פורסמו?', 'bad');
-  else toast('שגיאה: ' + msg, 'bad');
+  if (msg.includes('permission')) toast(tr('אין הרשאה למסד הנתונים. האם חוקי Firestore פורסמו?'), 'bad');
+  else toast(tr('שגיאה: ') + msg, 'bad');
 }

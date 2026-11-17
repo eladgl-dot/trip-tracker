@@ -6,6 +6,7 @@ import { breakdown, bars } from './charts.js';
 import { hashPin, checkPin, hashAdmin } from './pin.js';
 import { getRate, prefetchRates, getDayRates } from './rates.js';
 import { readReceipt } from './ocr.js';
+import { t, t as T, N, lang, LANGS, setLang, applyDir, backArrow, fwdArrow, isRtl, holdHebrew } from './i18n.js';
 import { watchLocation, fillAddresses } from './geo.js';
 import { shrinkImage } from './photo.js';
 import { ADMIN_HASH } from '../config.js';
@@ -48,7 +49,7 @@ const tagChip = (tag, extra = '') => { const c = L.tagColor(tag); return `<span 
 // Home view settings, remembered on this phone: scope 'mine'|'all', group 'year'|'tag'|'none', tag filter.
 const HOME_KEY = 'tt-home';
 const homePrefs = () => { try { return JSON.parse(ls.get(HOME_KEY)) || {}; } catch { return {}; } };
-const GROUP_NAMES = { year: 'לפי שנה', tag: 'לפי תגית', country: 'לפי מדינה', none: 'בלי קיבוץ' };
+const GROUP_NAMES = { year: N('לפי שנה'), tag: N('לפי תגית'), country: N('לפי מדינה'), none: N('בלי קיבוץ') };
 
 // Theme: a trip page uses the trip's setting (light / dark / auto); every other page follows the phone.
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
@@ -59,7 +60,8 @@ function applyTheme(mode) {
 }
 darkQuery.addEventListener?.('change', () => applyTheme(document.documentElement.dataset.theme || 'auto'));
 // Country flags (pictures, because Windows shows emoji flags as letters).
-const flagImg = c => `<img class="flag" src="${L.flagUrl(c)}" alt="${esc(L.countryName(c))}" title="${esc(L.countryName(c))}" width="21" height="16" loading="lazy">`;
+const cName = c => L.countryName(c, lang) || L.countryName(c);
+const flagImg = c => `<img class="flag" src="${L.flagUrl(c)}" alt="${esc(cName(c))}" title="${esc(cName(c))}" width="21" height="16" loading="lazy">`;
 const flagsOf = t => { const cs = L.cleanCountries(t.countries); return cs.length ? `<span class="flags">${cs.map(flagImg).join('')}</span>` : ''; };
 
 const go = hash => { if (location.hash === hash) route(); else location.hash = hash; };
@@ -85,10 +87,10 @@ try {
 } catch (err) {
   console.error(err);
   view.innerHTML = `<div class="wrap" style="padding-top:40px"><div class="card center">
-    <div style="font-size:48px">📡</div><h2>לא ניתן להתחבר</h2>
-    <p class="muted">בפעם הראשונה צריך חיבור לאינטרנט. אם יש חיבור, ייתכן שההתחברות האנונימית ב-Firebase לא מופעלת.</p>
+    <div style="font-size:48px">📡</div><h2>${t('לא ניתן להתחבר')}</h2>
+    <p class="muted">${t('בפעם הראשונה צריך חיבור לאינטרנט. אם יש חיבור, ייתכן שההתחברות האנונימית ב-Firebase לא מופעלת.')}</p>
     <p class="muted small" dir="ltr">${esc(err.code || err.message)}</p>
-    <div class="row2"><button class="btn primary" onclick="location.reload()">נסו שוב</button><a class="btn ghost" href="?demo">מצב הדגמה</a></div>
+    <div class="row2"><button class="btn primary" onclick="location.reload()">${t('נסו שוב')}</button><a class="btn ghost" href="?demo">${t('מצב הדגמה')}</a></div>
   </div></div>`;
   throw err;
 }
@@ -102,7 +104,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (reloaded) return; reloaded = true;
-      if (!document.querySelector('.scrim')) location.reload(); else toast('גרסה חדשה מוכנה – היא תיטען ברענון הבא');
+      if (!document.querySelector('.scrim')) location.reload(); else toast(t('גרסה חדשה מוכנה – היא תיטען ברענון הבא'));
     });
   }
 }
@@ -110,16 +112,18 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 function banners() {
   const b = $('#banner');
   const draw = () => {
-    b.innerHTML = (store.kind === 'demo' ? `<div class="demo-bar">🧪 מצב הדגמה: הנתונים נשמרים רק בדפדפן הזה · <a href="?demo=0">מעבר לנתונים האמיתיים</a></div>` : '')
-      + (navigator.onLine ? '' : `<div class="offline">📴 אין חיבור. השינויים נשמרים ויסונכרנו כשהחיבור יחזור</div>`);
+    b.innerHTML = (store.kind === 'demo' ? `<div class="demo-bar">🧪 ${t('מצב הדגמה: הנתונים נשמרים רק בדפדפן הזה')} · <a href="?demo=0">${t('מעבר לנתונים האמיתיים')}</a></div>` : '')
+      + (navigator.onLine ? '' : `<div class="offline">📴 ${t('אין חיבור. השינויים נשמרים ויסונכרנו כשהחיבור יחזור')}</div>`);
   };
   addEventListener('online', draw); addEventListener('offline', draw); draw();
+  banners.redraw = draw;
 }
 
 function route() {
   cleanups.forEach(fn => fn()); cleanups = [];
   closeAll();
   pending.flush(); hideUndoToast();
+  holdHebrew(false); // the admin panel holds Hebrew right-to-left; every other page uses the chosen language
   window.scrollTo(0, 0);
   const h = location.hash.replace(/^#\/?/, '');
   const [page, id, sub] = h.split('/');
@@ -137,9 +141,9 @@ const WA_ICON = `<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy=
 async function shareTrip(trip) {
   if (!trip) return;
   const link = location.origin + location.pathname + '#/trip/' + encodeURIComponent(trip.id);
-  const m = modal(`<h2>שיתוף בוואטסאפ</h2>
-    <p class="muted">לשתף גם את סיסמת הטיול באותה הודעה?<br>בלי הסיסמה, מי שמקבל את הקישור יצטרך לבקש אותה.</p>
-    <div class="stack"><button class="btn wa-go" data-pin>כן, עם הסיסמה</button><button class="btn ghost" data-link>רק קישור</button></div>`, { label: 'שיתוף בוואטסאפ' });
+  const m = modal(`<h2>${t('שיתוף בוואטסאפ')}</h2>
+    <p class="muted">${t('לשתף גם את סיסמת הטיול באותה הודעה?')}<br>${t('בלי הסיסמה, מי שמקבל את הקישור יצטרך לבקש אותה.')}</p>
+    <div class="stack"><button class="btn wa-go" data-pin>${t('כן, עם הסיסמה')}</button><button class="btn ghost" data-link>${t('רק קישור')}</button></div>`, { label: t('שיתוף בוואטסאפ') });
   m.el.querySelector('[data-pin]').onclick = () => m.close('pin');
   m.el.querySelector('[data-link]').onclick = () => m.close('link');
   const how = await m.result;
@@ -147,12 +151,12 @@ async function shareTrip(trip) {
   let pin = '';
   if (how === 'pin') {
     const ok = await codePrompt({
-      title: 'סיסמת הטיול', text: 'הקלידו את 4 הספרות כדי לצרף אותן להודעה', length: 4, ok: 'לשתף', okClass: 'wa-go',
+      title: t('סיסמת הטיול'), text: t('הקלידו את 4 הספרות כדי לצרף אותן להודעה'), length: 4, ok: t('לשתף'), okClass: 'wa-go',
       check: async code => { const good = await checkPin(trip, code); if (good) pin = code; return good; }
     });
     if (!ok) return;
   }
-  const url = L.shareUrl(L.shareMessage(trip.name, link, pin));
+  const url = L.shareUrl(L.shareMessage(trip.name, link, pin, [t('הוצאות הטיול'), t('סיסמה')]));
   if (!window.open(url, '_blank')) location.href = url; // popup blocked: hand over to WhatsApp in this window
 }
 
@@ -164,11 +168,11 @@ function drawInstall() {
   const host = $('#install'); if (!host) return;
   const hidden = Number(ls.get(INSTALL_HIDE)) > Date.now();
   if (!window.ttInstall || hidden) { host.innerHTML = ''; return; }
-  host.innerHTML = `<div class="install" role="region" aria-label="התקנה">
+  host.innerHTML = `<div class="install" role="region" aria-label="${t('התקנה')}">
       <div class="ic" aria-hidden="true">🧳</div>
-      <div class="txt"><b>להתקין כאפליקציה?</b><span class="muted">פותחים ממסך הבית, עובד גם בלי אינטרנט</span></div>
-      <button class="btn primary sm" id="installGo">התקנה</button>
-      <button class="x" id="installX" title="סגירה" aria-label="סגירה">✕</button></div>`;
+      <div class="txt"><b>${t('להתקין כאפליקציה?')}</b><span class="muted">${t('פותחים ממסך הבית, עובד גם בלי אינטרנט')}</span></div>
+      <button class="btn primary sm" id="installGo">${t('התקנה')}</button>
+      <button class="x" id="installX" title="${t('סגירה')}" aria-label="${t('סגירה')}">✕</button></div>`;
   const snooze = () => ls.set(INSTALL_HIDE, String(Date.now() + INSTALL_SNOOZE_MS));
   $('#installGo').onclick = async () => {
     const e = window.ttInstall; if (!e) return;
@@ -184,43 +188,44 @@ function drawInstall() {
 // ---------------------------------------------------------------- help ("מה זה?")
 // Most common use first; each "▾" opens the next, less common level.
 const HELP_STEPS = [
-  ['פותחים טיול', '"+ טיול חדש": שם, תאריכים, מי נוסע, מטבע וסיסמה של 4 ספרות.'],
-  ['מתעדים כל הוצאה', '"+ להוסיף הוצאה": כמה, על מה, מתי ומי שילם. מטבע זר? מומר לבד.'],
-  ['משתפים עם מי שנוסע איתכם', '"שיתוף" שולח בוואטסאפ קישור (ואם רוצים – גם את הסיסמה). כולם רואים ומוסיפים.'],
-  ['מתחשבנים', 'בלשונית "התחשבנות" רואים מי מעביר כמה למי.']
+  [N('פותחים טיול'), N('"+ טיול חדש": שם, תאריכים, מי נוסע, מטבע וסיסמה של 4 ספרות.')],
+  [N('מתעדים כל הוצאה'), N('"+ להוסיף הוצאה": כמה, על מה, מתי ומי שילם. מטבע זר? מומר לבד.')],
+  [N('משתפים עם מי שנוסע איתכם'), N('"שיתוף" שולח בוואטסאפ קישור (ואם רוצים – גם את הסיסמה). כולם רואים ומוסיפים.')],
+  [N('מתחשבנים'), N('בלשונית "התחשבנות" רואים מי מעביר כמה למי.')]
 ];
 const HELP_MORE = [
-  ['↩️', 'ביטול מחיקה', `מחקתם תנועה או טיול בטעות? יש ${L.UNDO_MS / 1000} שניות ללחוץ "↩ ביטול" בהודעה שלמטה.`],
-  ['💰', 'תקציב', '✏️ בפרטי הטיול: תקציב לכל הטיול או ליום (לא חובה). המשבצת "תקציב" מראה כמה נשאר; לחיצה – פירוט וחלוקה לפי יום.'],
-  ['⭐', 'הטיולים שלי', 'במסך הראשי רואים רק טיולים שיצרתם או פתחתם עם הסיסמה. טיולים של אחרים ב"כל הטיולים" – בלי סכומים ובלי שמות.'],
-  ['🏷️', 'תגיות, חיפוש וקיבוץ', '⋮ על טיול ← "תגיות" (משפחה, חברים, עבודה…). לחיצה על תגית מסננת; "קיבוץ" מסדר לפי שנה או תגית; 🔍 מחפש שם, מקום או תגית.'],
-  ['📊', 'לאן הלך הכסף', '"פילוח" לפי קטגוריה או לפי יום, וממוצע ליום ולאדם. לחיצה על שורה מביאה את ההוצאות שלה לראש הרשימה.'],
-  ['👨‍👩‍👧', 'זוגות ומשפחות', `מחלקים לקבוצות (עד ${L.MAX_GROUPS}), וכל קבוצה מתחשבנת כמו אדם אחד.`],
-  ['↩️', 'החזר כספי', 'קיבלתם כסף בחזרה? מוסיפים "הכנסה" והיא יורדת מהסך הכול.'],
-  ['✏️', 'טעיתם?', '✏️ לעריכה ו-🗑️ למחיקה בכל הוצאה. 🔍 חיפוש לפי מילה או שם.'],
-  ['📄', 'סיכום ל-PDF', 'כפתור PDF בראש הטיול – דוח מסודר של כל ההוצאות, לשמירה או לשליחה.']
+  ['↩️', N('ביטול מחיקה'), N('מחקתם תנועה או טיול בטעות? יש {s} שניות ללחוץ "↩ ביטול" בהודעה שלמטה.')],
+  ['💰', N('תקציב'), N('✏️ בפרטי הטיול: תקציב לכל הטיול או ליום (לא חובה). המשבצת "תקציב" מראה כמה נשאר; לחיצה – פירוט וחלוקה לפי יום.')],
+  ['⭐', N('הטיולים שלי'), N('במסך הראשי רואים רק טיולים שיצרתם או פתחתם עם הסיסמה. טיולים של אחרים ב"כל הטיולים" – בלי סכומים ובלי שמות.')],
+  ['🏷️', N('תגיות, חיפוש וקיבוץ'), N('⋮ על טיול ← "תגיות" (משפחה, חברים, עבודה…). לחיצה על תגית מסננת; "קיבוץ" מסדר לפי שנה או תגית; 🔍 מחפש שם, מקום או תגית.')],
+  ['📊', N('לאן הלך הכסף'), N('"פילוח" לפי קטגוריה או לפי יום, וממוצע ליום ולאדם. לחיצה על שורה מביאה את ההוצאות שלה לראש הרשימה.')],
+  ['👨‍👩‍👧', N('זוגות ומשפחות'), N('מחלקים לקבוצות (עד {g}), וכל קבוצה מתחשבנת כמו אדם אחד.')],
+  ['↩️', N('החזר כספי'), N('קיבלתם כסף בחזרה? מוסיפים "הכנסה" והיא יורדת מהסך הכול.')],
+  ['✏️', N('טעיתם?'), N('✏️ לעריכה ו-🗑️ למחיקה בכל הוצאה. 🔍 חיפוש לפי מילה או שם.')],
+  ['📄', N('סיכום ל-PDF'), N('כפתור PDF בראש הטיול – דוח מסודר של כל ההוצאות, לשמירה או לשליחה.')]
 ];
 const HELP_PRO = [
-  ['✈️', 'עובד בלי אינטרנט', 'במטוס או בלי קליטה – רושמים כרגיל, הכול מסתנכרן כשחוזרת הרשת.'],
-  ['📷', 'קבלה ומיקום', 'אפשר לצרף צילום קבלה, והמקום נשמר על המפה.'],
-  ['💱', 'שער המרה', 'השער נלקח אוטומטית; אפשר להקליד שער משלכם.'],
-  ['🔒', 'סיסמת הטיול', 'נזכרת במכשיר ל-3 ימים, ואז מבקשים שוב.'],
-  ['📲', 'אפליקציה במסך הבית', '"התקנה" מוסיפה אייקון לטלפון, כמו אפליקציה רגילה.'],
-  ['🎨', 'צבע וקטגוריות', '✏️ בראש הטיול: צבע, תאריכים ומשתתפים. קטגוריה חדשה – ישר מתוך הוספת הוצאה.']
+  ['✈️', N('עובד בלי אינטרנט'), N('במטוס או בלי קליטה – רושמים כרגיל, הכול מסתנכרן כשחוזרת הרשת.')],
+  ['📷', N('קבלה ומיקום'), N('אפשר לצרף צילום קבלה, והמקום נשמר על המפה.')],
+  ['💱', N('שער המרה'), N('השער נלקח אוטומטית; אפשר להקליד שער משלכם.')],
+  ['🔒', N('סיסמת הטיול'), N('נזכרת במכשיר ל-3 ימים, ואז מבקשים שוב.')],
+  ['📲', N('אפליקציה במסך הבית'), N('"התקנה" מוסיפה אייקון לטלפון, כמו אפליקציה רגילה.')],
+  ['🎨', N('צבע וקטגוריות'), N('✏️ בראש הטיול: צבע, תאריכים ומשתתפים. קטגוריה חדשה – ישר מתוך הוספת הוצאה.')]
 ];
 function helpSheet() {
   helpShown = true; // also counts when storage is full/blocked
   try { localStorage.setItem('tt-help-seen', '1'); } catch {}
-  const tips = list => list.map(([ic, t, d]) => `<div class="help-tip"><i aria-hidden="true">${ic}</i><div><b>${esc(t)}</b><span>${esc(d)}</span></div></div>`).join('');
-  const m = modal(`<div class="help-head"><h2>❓ מה זה טיולון?</h2><button type="button" class="help-x" data-x title="סגירה" aria-label="סגירה">✕</button></div>
-    <p class="help-lead">מתעדים את כל הוצאות הטיול במקום אחד – כמה, על מה, מתי ואיפה – ורואים לאן הלך הכסף. נוסעים יחד? האפליקציה גם אומרת בסוף מי חייב למי.</p>
-    <div class="help-lvl">איך מתחילים</div>
-    ${HELP_STEPS.map(([t, d], i) => `<div class="help-step"><span class="n num" aria-hidden="true">${i + 1}</span><div><b>${esc(t)}</b><span>${esc(d)}</span></div></div>`).join('')}
-    <button type="button" class="help-more" data-lvl="more" aria-expanded="false" aria-controls="help-more">רוצים לדעת עוד? ▾</button>
-    <div id="help-more" hidden><div class="help-lvl" tabindex="-1">עוד דברים שימושיים</div>${tips(HELP_MORE)}
-      <button type="button" class="help-more" data-lvl="pro" aria-expanded="false" aria-controls="help-pro">למתקדמים ▾</button></div>
-    <div id="help-pro" hidden><div class="help-lvl" tabindex="-1">למתקדמים</div>${tips(HELP_PRO)}</div>
-    <button type="button" class="btn primary block help-done" data-x>הבנתי 👍</button>`, { sheet: true, label: 'מה זה טיולון?' });
+  const v = { s: L.UNDO_MS / 1000, g: L.MAX_GROUPS };
+  const tips = list => list.map(([ic, h, d]) => `<div class="help-tip"><i aria-hidden="true">${ic}</i><div><b>${esc(t(h))}</b><span>${esc(t(d, v))}</span></div></div>`).join('');
+  const m = modal(`<div class="help-head"><h2>❓ ${t('מה זה טיולון?')}</h2><button type="button" class="help-x" data-x title="${t('סגירה')}" aria-label="${t('סגירה')}">✕</button></div>
+    <p class="help-lead">${t('מתעדים את כל הוצאות הטיול במקום אחד – כמה, על מה, מתי ואיפה – ורואים לאן הלך הכסף. נוסעים יחד? האפליקציה גם אומרת בסוף מי חייב למי.')}</p>
+    <div class="help-lvl">${t('איך מתחילים')}</div>
+    ${HELP_STEPS.map(([h, d], i) => `<div class="help-step"><span class="n num" aria-hidden="true">${i + 1}</span><div><b>${esc(t(h))}</b><span>${esc(t(d))}</span></div></div>`).join('')}
+    <button type="button" class="help-more" data-lvl="more" aria-expanded="false" aria-controls="help-more">${t('רוצים לדעת עוד?')} ▾</button>
+    <div id="help-more" hidden><div class="help-lvl" tabindex="-1">${t('עוד דברים שימושיים')}</div>${tips(HELP_MORE)}
+      <button type="button" class="help-more" data-lvl="pro" aria-expanded="false" aria-controls="help-pro">${t('למתקדמים')} ▾</button></div>
+    <div id="help-pro" hidden><div class="help-lvl" tabindex="-1">${t('למתקדמים')}</div>${tips(HELP_PRO)}</div>
+    <button type="button" class="btn primary block help-done" data-x>${t('הבנתי')} 👍</button>`, { sheet: true, label: t('מה זה טיולון?') });
   m.el.classList.add('help');
   setTimeout(() => $('.help-x', m.el)?.focus({ preventScroll: true }), 50);
   $$('[data-x]', m.el).forEach(b => b.onclick = () => m.close());
@@ -240,25 +245,26 @@ function helpSeen() { if (helpShown) return true; try { return localStorage.getI
 // ---------------------------------------------------------------- home
 function homePage() {
   view.innerHTML = `
-    <header class="topbar">
-      <div class="brand"><h1>🧳 טיולון</h1><span class="muted">הוצאות משותפות לטיול</span></div>
-      <button type="button" class="help-pill" id="helpBtn">❓ מה זה?</button>
-      <button class="icon-btn" id="adminBtn" title="פאנל ניהול" aria-label="פאנל ניהול">⚙️</button>
+    <header class="topbar home-top">
+      <div class="brand"><h1>🧳 ${t('טיולון')}</h1><span class="muted">${t('הוצאות משותפות לטיול')}</span></div>
+      <div class="top-pills"><div class="lang-wrap"><button type="button" class="lang-pill" id="langBtn" aria-haspopup="menu" aria-expanded="false" aria-label="${t('שפה')}"><span aria-hidden="true">🌐</span> ${LANGS.find(l => l.code === lang).short} ▾</button></div>
+      <button type="button" class="help-pill" id="helpBtn">❓ ${t('מה זה?')}</button></div>
+      <button class="icon-btn" id="adminBtn" title="${t('פאנל ניהול')}" aria-label="${t('פאנל ניהול')}">⚙️</button>
     </header>
     <div class="wrap home">
       <div id="install"></div>
-      <input class="search" id="tripSearch" type="search" placeholder="🔍 חיפוש טיול, מקום, תגית" aria-label="חיפוש טיולים" autocomplete="off">
-      <div class="tabs scope" role="group" aria-label="אילו טיולים להציג">
-        <button type="button" data-scope="mine">⭐ שלי <span class="num" data-n="mine"></span></button>
-        <button type="button" data-scope="all">🌍 כל הטיולים <span class="num" data-n="all"></span></button>
+      <input class="search" id="tripSearch" type="search" placeholder="🔍 ${t('חיפוש טיול, מקום, תגית')}" aria-label="${t('חיפוש טיולים')}" autocomplete="off">
+      <div class="tabs scope" role="group" aria-label="${t('אילו טיולים להציג')}">
+        <button type="button" data-scope="mine">⭐ ${t('שלי')} <span class="num" data-n="mine"></span></button>
+        <button type="button" data-scope="all">🌍 ${t('כל הטיולים')} <span class="num" data-n="all"></span></button>
       </div>
-      <div class="tag-row" id="tagRow" role="group" aria-label="סינון לפי תגית"></div>
+      <div class="tag-row" id="tagRow" role="group" aria-label="${t('סינון לפי תגית')}"></div>
       <div class="home-bar"><span id="homeCount" class="muted"></span>
         <button type="button" class="pill-btn" id="groupBtn" aria-haspopup="menu"></button></div>
       <div id="trips"><div class="skeleton"></div></div>
-      <p class="version muted small center">גרסה <span class="num" dir="ltr">${esc(window.TT_VERSION || '?')}</span></p>
+      <p class="version muted small center">${t('גרסה')} <span class="num" dir="ltr">${esc(window.TT_VERSION || '?')}</span></p>
     </div>
-    <a class="fab" id="newTrip" href="#/new"><span aria-hidden="true">+</span>טיול חדש</a>`;
+    <a class="fab" id="newTrip" href="#/new"><span aria-hidden="true">+</span>${t('טיול חדש')}</a>`;
   $('#adminBtn').onclick = askAdmin;
   $('#helpBtn').onclick = helpSheet;
   if (!helpSeen()) { // first visit on this device: open once
@@ -268,7 +274,7 @@ function homePage() {
   drawInstall();
   addEventListener('tt-install', drawInstall); cleanups.push(() => removeEventListener('tt-install', drawInstall));
   const host = $('#trips');
-  const closeMenus = e => { if (!e.target.closest('.kebab, .menu, #groupBtn')) $$('.menu').forEach(m => m.remove()); };
+  const closeMenus = e => { if (!e.target.closest('.kebab, .menu, #groupBtn, #langBtn')) { $$('.menu').forEach(m => m.remove()); $('#langBtn')?.setAttribute('aria-expanded', 'false'); } };
   document.addEventListener('click', closeMenus);
   cleanups.push(() => document.removeEventListener('click', closeMenus));
 
@@ -279,25 +285,25 @@ function homePage() {
 
   const card = (t, mine) => {
     const tags = (t.tags || []).map(x => tagChip(x)).join('');
-    if (!mine) return `<article class="card trip-card other" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)} – פתיחה עם סיסמה">
-        <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
+    if (!mine) return `<article class="card trip-card other" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)} – ${T('פתיחה עם סיסמה')}">
+        <button class="kebab" title="${T('אפשרויות')}" aria-label="${T('אפשרויות')}">⋮</button>
         <h3><bdi>${esc(t.name)}</bdi></h3>
         <div class="muted">${flagsOf(t) || '📍'} <bdi>${esc(t.location)}</bdi>${t.startDate ? ` · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}</div>
-        <div class="tags">${tags}<span class="muted small">🔒 פתיחה עם סיסמה</span></div>
+        <div class="tags">${tags}<span class="muted small">🔒 ${T('פתיחה עם סיסמה')}</span></div>
       </article>`;
     const left = accessLeft(t.id);
     const days = Math.ceil(left / 86400000);
     return `<article class="card trip-card" style="${tripStyle(t.color)}" data-id="${esc(t.id)}" tabindex="0" role="button" aria-label="${esc(t.name)}">
-        <button class="kebab" title="אפשרויות" aria-label="אפשרויות">⋮</button>
-        <h3><bdi>${esc(t.name)}</bdi>${st.scope === 'all' ? ' <span class="star" title="שלי" aria-label="שלי">⭐</span>' : ''}</h3>
+        <button class="kebab" title="${T('אפשרויות')}" aria-label="${T('אפשרויות')}">⋮</button>
+        <h3><bdi>${esc(t.name)}</bdi>${st.scope === 'all' ? ` <span class="star" title="${T('שלי')}" aria-label="${T('שלי')}">⭐</span>` : ''}</h3>
         <div class="muted">${flagsOf(t) || '📍'} <bdi>${esc(t.location)}</bdi></div>
         <div class="chips">
           ${t.startDate ? `<span class="chip sky num">${esc(dateRange(t.startDate, t.endDate))}</span>` : ''}
-          <span class="chip">👥 ${t.participants.length} משתתפים</span>
+          <span class="chip">👥 ${T('{n} משתתפים', { n: t.participants.length })}</span>
           <span class="chip mint">${L.viewCurrencyOf(t) ? `<bdi dir="ltr">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)} → ${esc(L.currencySymbol(L.viewCurrencyOf(t)))}</bdi>` : `${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}`}</span>
         </div>
         ${tags ? `<div class="tags">${tags}</div>` : ''}
-        ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? 'מחר' : `עוד ${days} ימים`} צריך להזין את הסיסמא שוב</div>` : ''}
+        ${left > 0 ? `<div class="lock">🔓 ${days <= 1 ? T('מחר צריך להזין את הסיסמה שוב') : T('עוד {n} ימים צריך להזין את הסיסמה שוב', { n: days })}</div>` : ''}
       </article>`;
   };
 
@@ -313,40 +319,40 @@ function homePage() {
     // tag filter: only tags that appear in the trips of the current tab
     const scopeTags = L.allTags(st.scope === 'all' ? trips : trips.filter(t => mine.has(t.id)));
     if (st.tag && !scopeTags.some(x => x.toLowerCase() === st.tag.toLowerCase())) scopeTags.unshift(st.tag);
-    $('#tagRow').innerHTML = scopeTags.length ? `<button type="button" class="tag-f ${st.tag ? '' : 'on'}" data-tag="" aria-pressed="${!st.tag}">הכל</button>`
+    $('#tagRow').innerHTML = scopeTags.length ? `<button type="button" class="tag-f ${st.tag ? '' : 'on'}" data-tag="" aria-pressed="${!st.tag}">${t('הכל')}</button>`
       + scopeTags.map(x => { const c = L.tagColor(x); return `<button type="button" class="tag-f ${st.tag === x ? 'on' : ''}" data-tag="${esc(x)}" aria-pressed="${st.tag === x}" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(x)}</bdi>${st.tag === x ? ' ✓' : ''}</button>`; }).join('') : '';
-    $('#groupBtn').textContent = `קיבוץ: ${GROUP_NAMES[st.group]} ▾`;
+    $('#groupBtn').textContent = `${t('קיבוץ:')} ${t(GROUP_NAMES[st.group])} ▾`;
 
     const opts = { mine, scope: st.scope, tag: st.tag, query: st.query };
     const shown = L.filterTrips(trips, opts);
     const filtered = !!(st.query.trim() || st.tag);
     const total = st.scope === 'all' ? trips.length : nMine;
-    $('#homeCount').innerHTML = filtered ? `<b class="num">${shown.length}</b> מתוך <span class="num">${total}</span>` : `<span class="num">${shown.length}</span> טיולים`;
+    $('#homeCount').innerHTML = filtered ? t('<b class="num">{a}</b> מתוך <span class="num">{b}</span>', { a: shown.length, b: total }) : (shown.length === 1 ? t('טיול אחד') : t('<span class="num">{n}</span> טיולים', { n: shown.length }));
     host.style.display = 'grid'; host.style.gridTemplateColumns = 'minmax(0, 1fr)'; host.style.gap = 'var(--s3)';
 
     if (!trips.length) {
-      host.innerHTML = `<div class="empty"><div class="big">🗺️</div><p>עוד אין טיולים.<br>לחצו על "+ טיול חדש" כדי להתחיל.</p></div>`;
+      host.innerHTML = `<div class="empty"><div class="big">🗺️</div><p>${t('עוד אין טיולים.')}<br>${t('לחצו על "+ טיול חדש" כדי להתחיל.')}</p></div>`;
       return;
     }
     let html = '';
     if (!shown.length) {
       html = st.scope === 'mine' && !nMine
-        ? `<div class="empty"><div class="big">⭐</div><p>עוד אין טיולים שלך בטלפון הזה.<br>טיול שתיצרו או תפתחו עם הסיסמה יופיע כאן.</p></div>`
-        : `<div class="empty">לא נמצאו טיולים${st.query.trim() ? ` עבור "<bdi>${esc(st.query.trim())}</bdi>"` : ''}${st.tag ? ` עם התגית "<bdi>${esc(st.tag)}</bdi>"` : ''}</div>`;
+        ? `<div class="empty"><div class="big">⭐</div><p>${t('עוד אין טיולים שלך בטלפון הזה.')}<br>${t('טיול שתיצרו או תפתחו עם הסיסמה יופיע כאן.')}</p></div>`
+        : `<div class="empty">${t('לא נמצאו טיולים')}${st.query.trim() ? ` ${t('עבור')} "<bdi>${esc(st.query.trim())}</bdi>"` : ''}${st.tag ? ` ${t('עם התגית')} "<bdi>${esc(st.tag)}</bdi>"` : ''}</div>`;
     } else {
-      const groups = L.groupTrips(shown, st.group, st.tag);
+      const groups = L.groupTrips(shown, st.group, st.tag, lang);
       html = groups.map((g, i) => {
         const defOpen = filtered || st.group !== 'year' || i === 0 || g.label === String(new Date().getFullYear());
         const open = st.toggled.has(g.key) ? !defOpen : defOpen;
         const head = !g.label ? '' : `<button type="button" class="sec ${open ? '' : 'closed'}" data-sec="${esc(g.key)}" aria-expanded="${open}">
-            ${g.tag ? tagChip(g.tag) : `<span>${g.country ? flagImg(g.country) + ' ' : ''}<bdi>${esc(g.label)}</bdi></span>`}
-            <span class="cnt">· <span class="num">${g.trips.length}</span> ${g.trips.length === 1 ? 'טיול' : 'טיולים'}</span><span class="chev" aria-hidden="true">${open ? '▾' : '◂'}</span></button>`;
+            ${g.tag ? tagChip(g.tag) : `<span>${g.country ? flagImg(g.country) + ' ' : ''}<bdi>${esc(t(g.label))}</bdi></span>`}
+            <span class="cnt">· ${g.trips.length === 1 ? t('טיול אחד') : t('<span class="num">{n}</span> טיולים', { n: g.trips.length })}</span><span class="chev" aria-hidden="true">${open ? '▾' : isRtl() ? '◂' : '▸'}</span></button>`;
         return head + (open ? g.trips.map(t => card(t, mine.has(t.id))).join('') : '');
       }).join('');
     }
     if (st.scope === 'mine' && (filtered || !nMine)) { // more matches outside "mine"
       const more = L.filterTrips(trips, { ...opts, scope: 'all' }).filter(t => !mine.has(t.id)).length;
-      if (more) html += `<button type="button" class="hint" data-scope-all>🌍 ${more === 1 ? 'עוד טיול אחד מתאים' : `עוד <span class="num">${more}</span> טיולים מתאימים`} ב"כל הטיולים" – להציג</button>`;
+      if (more) html += `<button type="button" class="hint" data-scope-all>🌍 ${more === 1 ? t('עוד טיול אחד מתאים ב"כל הטיולים" – להציג') : t('עוד <span class="num">{n}</span> טיולים מתאימים ב"כל הטיולים" – להציג', { n: more })}</button>`;
     }
     host.innerHTML = html;
 
@@ -361,15 +367,15 @@ function homePage() {
         if (had) return;
         const isMine = mine.has(trip.id);
         c.insertAdjacentHTML('beforeend', `<div class="menu" role="menu">
-          <button role="menuitem" data-m="tags">🏷️ תגיות</button>
-          ${isMine ? `<button role="menuitem" data-m="unmine">🙈 להסיר מהטיולים שלי</button>` : `<button role="menuitem" data-m="mine">⭐ להוסיף לטיולים שלי</button>`}
-          <button class="red" role="menuitem" data-m="del">🗑️ מחיקת טיול</button></div>`);
+          <button role="menuitem" data-m="tags">🏷️ ${t('תגיות')}</button>
+          ${isMine ? `<button role="menuitem" data-m="unmine">🙈 ${t('להסיר מהטיולים שלי')}</button>` : `<button role="menuitem" data-m="mine">⭐ ${t('להוסיף לטיולים שלי')}</button>`}
+          <button class="red" role="menuitem" data-m="del">🗑️ ${t('מחיקת טיול')}</button></div>`);
         $$('.menu button', c).forEach(b => b.onclick = async ev => {
           ev.stopPropagation(); $('.menu', c).remove();
           const m = b.dataset.m;
           if (m === 'del') deleteTripFlow(trip);
-          else if (m === 'unmine') { removeMine(trip.id); toast('הוסר מ"שלי". הטיול עצמו לא נמחק'); draw(); }
-          else if (m === 'mine') { if (await unlock(trip) && alive) { toast('נוסף ל"שלי" ⭐', 'good'); draw(); } }
+          else if (m === 'unmine') { removeMine(trip.id); toast(T('הוסר מ"שלי". הטיול עצמו לא נמחק')); draw(); }
+          else if (m === 'mine') { if (await unlock(trip) && alive) { toast(T('נוסף ל"שלי" ⭐'), 'good'); draw(); } }
           else if (m === 'tags') { if (await unlock(trip) && alive) { draw(); tagSheet(trip); } }
         });
       };
@@ -388,9 +394,19 @@ function homePage() {
       const had = $('#groupMenu'); $$('.menu').forEach(m => m.remove());
       if (had) return;
       $('.home-bar').insertAdjacentHTML('beforeend', `<div class="menu" id="groupMenu" role="menu">${Object.entries(GROUP_NAMES).map(([k, n]) =>
-        `<button role="menuitemradio" aria-checked="${st.group === k}" data-group="${k}">${st.group === k ? '✓ ' : ''}${n}</button>`).join('')}</div>`);
+        `<button role="menuitemradio" aria-checked="${st.group === k}" data-group="${k}">${st.group === k ? '✓ ' : ''}${t(n)}</button>`).join('')}</div>`);
       return;
     }
+    if (e.target.closest('#langBtn')) { // 🌐 language: remembered on this phone; the page is drawn again in the new language
+      const had = $('#langMenu'); $$('.menu').forEach(m => m.remove());
+      $('#langBtn').setAttribute('aria-expanded', String(!had));
+      if (had) return;
+      $('.lang-wrap').insertAdjacentHTML('beforeend', `<div class="menu" id="langMenu" role="menu">${LANGS.map(l =>
+        `<button role="menuitemradio" aria-checked="${l.code === lang}" data-lang="${l.code}" lang="${l.code}"><code>${l.short}</code><bdi>${l.name}</bdi>${l.code === lang ? '<span class="ck">✓</span>' : ''}</button>`).join('')}</div>`);
+      return;
+    }
+    const lg = e.target.closest('[data-lang]');
+    if (lg) { const changed = lg.dataset.lang !== lang; $('#langMenu')?.remove(); if (changed) { setLang(lg.dataset.lang); banners.redraw?.(); route(); } return; }
     const g = e.target.closest('[data-group]');
     if (g) { st.group = g.dataset.group; st.toggled.clear(); savePrefs(); $('#groupMenu')?.remove(); draw(); }
   };
@@ -401,7 +417,7 @@ function homePage() {
     purgeExpired(trips);
     st.trips = trips.filter(t => !L.isDeleted(t)).map(t => ({ ...t, tags: L.normTags(t.tags) }));
     draw();
-  }, err => { host.innerHTML = `<div class="empty"><div class="big">🔒</div><p>אין גישה לנתונים.</p></div>`; reportError(err); }));
+  }, err => { host.innerHTML = `<div class="empty"><div class="big">🔒</div><p>${t('אין גישה לנתונים.')}</p></div>`; reportError(err); }));
 }
 
 // Tag picker used in the trip form and in the ⋮ → תגיות sheet. Returns a getter for the chosen tags.
@@ -411,13 +427,13 @@ function bindTagPicker(root, initial) {
   const draw = () => {
     const sugg = knownTags.filter(x => !tags.some(y => y.toLowerCase() === x.toLowerCase())).slice(0, 12);
     $('.tp-on', box).innerHTML = tags.length ? tags.map((x, i) => { const c = L.tagColor(x);
-      return `<span class="tag" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(x)}</bdi><button type="button" data-rmtag="${i}" aria-label="הסרת התגית ${esc(x)}">✕</button></span>`; }).join('')
-      : '<span class="muted small">אין עדיין תגיות</span>';
+      return `<span class="tag" style="--tg:${c.bg};--ti:${c.ink}"><bdi>${esc(x)}</bdi><button type="button" data-rmtag="${i}" aria-label="${esc(t('הסרת התגית {x}', { x }))}">✕</button></span>`; }).join('')
+      : `<span class="muted small">${t('אין עדיין תגיות')}</span>`;
     $('.tp-sugg', box).innerHTML = sugg.map(x => `<button type="button" class="tag add" data-addtag="${esc(x)}">+ <bdi>${esc(x)}</bdi></button>`).join('');
   };
   const add = name => {
     const next = L.normTags([...tags, name]);
-    if (next.length === tags.length && name.trim()) { toast(tags.length >= L.MAX_TAGS ? `עד ${L.MAX_TAGS} תגיות לטיול` : 'התגית כבר קיימת'); return; }
+    if (next.length === tags.length && name.trim()) { toast(tags.length >= L.MAX_TAGS ? t('עד {n} תגיות לטיול', { n: L.MAX_TAGS }) : t('התגית כבר קיימת')); return; }
     tags = next; draw();
   };
   box.addEventListener('click', e => {
@@ -430,24 +446,24 @@ function bindTagPicker(root, initial) {
   draw();
   return () => { if (input.value.trim()) { tags = L.normTags([...tags, input.value]); input.value = ''; } return tags; };
 }
-function tagPickerHtml() { return `<div class="field tagpick"><span class="lbl">תגיות <span class="small">(למשל: משפחה, חברים, עבודה)</span></span>
+function tagPickerHtml() { return `<div class="field tagpick"><span class="lbl">${t('תגיות')} <span class="small">${t('(למשל: משפחה, חברים, עבודה)')}</span></span>
     <div class="tags tp-on"></div><div class="tags tp-sugg"></div>
-    <div class="chip-input"><input class="tagpick-in" maxlength="20" placeholder="תגית חדשה…" autocomplete="off" enterkeyhint="done" aria-label="תגית חדשה"><button type="button" class="btn ghost sm tagpick-add">הוספה</button></div></div>`; }
+    <div class="chip-input"><input class="tagpick-in" maxlength="20" placeholder="${t('תגית חדשה…')}" autocomplete="off" enterkeyhint="done" aria-label="${t('תגית חדשה')}"><button type="button" class="btn ghost sm tagpick-add">${t('הוספה')}</button></div></div>`; }
 
 function tagSheet(trip) {
-  const m = modal(`<h2>🏷️ תגיות – <bdi>${esc(trip.name)}</bdi></h2>${tagPickerHtml()}
-    <p class="muted small">התגיות משותפות: כל מי שפותח את הטיול רואה אותן.</p>
-    <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button type="button" class="btn primary" data-save>שמירה</button></div>`, { sheet: true, label: 'תגיות' });
+  const m = modal(`<h2>🏷️ ${t('תגיות')} – <bdi>${esc(trip.name)}</bdi></h2>${tagPickerHtml()}
+    <p class="muted small">${t('התגיות משותפות: כל מי שפותח את הטיול רואה אותן.')}</p>
+    <div class="row2"><button type="button" class="btn ghost" data-x>${t('ביטול')}</button><button type="button" class="btn primary" data-save>${t('שמירה')}</button></div>`, { sheet: true, label: t('תגיות') });
   const read = bindTagPicker(m.el, trip.tags);
   $('[data-x]', m.el).onclick = () => m.close();
-  $('[data-save]', m.el).onclick = () => { fire(store.updateTrip(trip.id, { tags: read() })); m.close(); toast('התגיות נשמרו', 'good'); };
+  $('[data-save]', m.el).onclick = () => { fire(store.updateTrip(trip.id, { tags: read() })); m.close(); toast(T('התגיות נשמרו'), 'good'); };
 }
 
 async function unlock(trip) {
   if (accessLeft(trip.id) > 0) { addMine(trip.id); return true; } // opening a trip makes it "mine" again
   const ok = await codePrompt({
-    title: '🔒 ' + trip.name, text: 'סיסמת הטיול (4 ספרות)', length: 4,
-    note: 'הגישה תישמר במכשיר הזה ל-3 ימים', check: code => checkPin(trip, code)
+    title: '🔒 ' + trip.name, text: t('סיסמת הטיול (4 ספרות)'), length: 4,
+    note: t('הגישה תישמר במכשיר הזה ל-3 ימים'), check: code => checkPin(trip, code)
   });
   if (ok) grantAccess(trip.id);
   return ok;
@@ -457,66 +473,66 @@ async function openTrip(trip) { if (await unlock(trip)) go('#/trip/' + trip.id);
 // Admin code check; a correct code also opens the admin session for this tab.
 async function adminCode(title) {
   if (isAdmin()) return true;
-  const ok = await codePrompt({ title, text: 'קוד מנהל (6 ספרות)', length: 6, check: async c => await hashAdmin(c) === ADMIN_HASH });
+  const ok = await codePrompt({ title, text: t('קוד מנהל (6 ספרות)'), length: 6, check: async c => await hashAdmin(c) === ADMIN_HASH });
   if (ok) sessionStorage.setItem('tt-admin', '1');
   return ok;
 }
 
 async function deleteTripFlow(trip) {
-  if (!await adminCode('🗑️ מחיקת טיול')) return;
-  const ok = await confirmBox('מחיקת טיול', `למחוק את "${trip.name}" וכל התנועות שלו?`, { ok: 'מחיקה', danger: true });
+  if (!await adminCode('🗑️ ' + t('מחיקת טיול'))) return;
+  const ok = await confirmBox(t('מחיקת טיול'), t('למחוק את "{name}" וכל התנועות שלו?', { name: trip.name }), { ok: t('מחיקה'), danger: true });
   if (!ok) return;
   // Soft delete: hidden everywhere, restorable from the admin panel for L.TRASH_DAYS days (the user just sees "נמחק").
   fire(store.updateTrip(trip.id, { deletedAt: Date.now() }));
-  undoToast(`נמחק: ${trip.name}`, () => { fire(store.updateTrip(trip.id, { deletedAt: null })); toast('שוחזר', 'good'); }, L.UNDO_MS);
+  undoToast(T('נמחק: {x}', { x: trip.name }), () => { fire(store.updateTrip(trip.id, { deletedAt: null })); toast(T('שוחזר'), 'good'); }, L.UNDO_MS);
 }
 
 async function askAdmin() {
-  if (await adminCode('⚙️ פאנל ניהול')) go('#/admin');
+  if (await adminCode('⚙️ ' + t('פאנל ניהול'))) go('#/admin');
 }
 
 // ---------------------------------------------------------------- trip form (create + edit)
 function currencyOptions(selected) {
-  return L.CURRENCIES.map(c => `<option value="${c.code}" ${c.code === selected ? 'selected' : ''}>${c.code} ${c.symbol !== c.code ? c.symbol + ' ' : ''}– ${c.name}</option>`).join('');
+  return L.CURRENCIES.map(c => `<option value="${c.code}" ${c.code === selected ? 'selected' : ''}>${c.code} ${c.symbol !== c.code ? c.symbol + ' ' : ''}– ${esc(T(c.name))}</option>`).join('');
 }
 
 function tripFormHtml(t, withPin) {
   return `
-    <div class="field" data-f="name"><label class="lbl" for="f-name">שם הטיול *</label><input id="f-name" maxlength="80" value="${esc(t.name || '')}" autocomplete="off"><p class="err"></p></div>
-    <div class="field" data-f="location"><label class="lbl" for="f-loc">מיקום / יעד *</label><input id="f-loc" maxlength="80" value="${esc(t.location || '')}" autocomplete="off"><p class="err"></p></div>
+    <div class="field" data-f="name"><label class="lbl" for="f-name">${T('שם הטיול')} *</label><input id="f-name" maxlength="80" value="${esc(t.name || '')}" autocomplete="off"><p class="err"></p></div>
+    <div class="field" data-f="location"><label class="lbl" for="f-loc">${T('מיקום / יעד')} *</label><input id="f-loc" maxlength="80" value="${esc(t.location || '')}" autocomplete="off"><p class="err"></p></div>
     <div class="row2 field" data-f="endDate">
-      <div><label class="lbl" for="f-start">תאריך התחלה</label><input id="f-start" type="date" value="${esc(t.startDate || '')}"></div>
-      <div><label class="lbl" for="f-end">תאריך סיום</label><input id="f-end" type="date" value="${esc(t.endDate || '')}"></div>
+      <div><label class="lbl" for="f-start">${T('תאריך התחלה')}</label><input id="f-start" type="date" value="${esc(t.startDate || '')}"></div>
+      <div><label class="lbl" for="f-end">${T('תאריך סיום')}</label><input id="f-end" type="date" value="${esc(t.endDate || '')}"></div>
       <p class="err" style="grid-column:1/-1"></p>
     </div>
-    <div class="field"><label class="lbl" for="f-cty-in">🌍 מדינות</label>
+    <div class="field"><label class="lbl" for="f-cty-in">🌍 ${T('מדינות')}</label>
       <div class="chips" id="f-cty"></div>
-      <input id="f-cty-in" type="search" placeholder="חיפוש מדינה…" autocomplete="off" enterkeyhint="search">
-      <div class="cty-list" id="f-cty-list" role="group" aria-label="תוצאות חיפוש מדינה"></div>
+      <input id="f-cty-in" type="search" placeholder="${T('חיפוש מדינה…')}" autocomplete="off" enterkeyhint="search">
+      <div class="cty-list" id="f-cty-list" role="group" aria-label="${T('תוצאות חיפוש מדינה')}"></div>
       <div class="cty-sug" id="f-cty-sug"></div></div>
-    <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">מטבע הזנה * <span class="small">(ברירת המחדל להוצאה חדשה)</span></label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
-    <div class="field"><label class="lbl" for="f-vcur">מטבע תצוגה <span class="small">(סכומים, התחשבנות, תקציב, גרפים)</span></label>
-      <select id="f-vcur"><option value="">כמו מטבע ההזנה</option>${currencyOptions(L.viewCurrencyOf(t))}</select>
-      <p class="muted small">כל הוצאה מומרת לפי השער של היום שבו שולמה. בדף הטיול אפשר לעבור בין שני המטבעות.</p></div>
-    <div class="field" data-f="budget"><label class="lbl" for="f-bud">💰 תקציב <span class="small">(לא חובה)</span></label>
-      <div class="toggle" role="group" aria-label="סוג התקציב" id="f-bud-per"><button type="button" data-per="trip" aria-pressed="${t.budget?.per !== 'day'}">לכל הטיול</button><button type="button" data-per="day" aria-pressed="${t.budget?.per === 'day'}">ליום</button></div>
-      <div class="chip-input bud-in"><input id="f-bud" class="num" inputmode="decimal" autocomplete="off" placeholder="ריק = בלי תקציב" value="${t.budget?.amount ?? ''}"><span class="chip mint" id="f-bud-cur"></span></div>
+    <div class="field" data-f="defaultCurrency"><label class="lbl" for="f-cur">${T('מטבע הזנה')} * <span class="small">${T('(ברירת המחדל להוצאה חדשה)')}</span></label><select id="f-cur">${currencyOptions(t.defaultCurrency || 'EUR')}</select><p class="err"></p></div>
+    <div class="field"><label class="lbl" for="f-vcur">${T('מטבע תצוגה')} <span class="small">${T('(סכומים, התחשבנות, תקציב, גרפים)')}</span></label>
+      <select id="f-vcur"><option value="">${T('כמו מטבע ההזנה')}</option>${currencyOptions(L.viewCurrencyOf(t))}</select>
+      <p class="muted small">${T('כל הוצאה מומרת לפי השער של היום שבו שולמה. בדף הטיול אפשר לעבור בין שני המטבעות.')}</p></div>
+    <div class="field" data-f="budget"><label class="lbl" for="f-bud">💰 ${T('תקציב')} <span class="small">${T('(לא חובה)')}</span></label>
+      <div class="toggle" role="group" aria-label="${T('סוג התקציב')}" id="f-bud-per"><button type="button" data-per="trip" aria-pressed="${t.budget?.per !== 'day'}">${T('לכל הטיול')}</button><button type="button" data-per="day" aria-pressed="${t.budget?.per === 'day'}">${T('ליום')}</button></div>
+      <div class="chip-input bud-in"><input id="f-bud" class="num" inputmode="decimal" autocomplete="off" placeholder="${T('ריק = בלי תקציב')}" value="${t.budget?.amount ?? ''}"><span class="chip mint" id="f-bud-cur"></span></div>
       <p class="muted small" id="f-bud-hint"></p><p class="err"></p></div>
-    <div class="field"><span class="lbl" id="f-color-l">צבע הטיול</span>
+    <div class="field"><span class="lbl" id="f-color-l">${T('צבע הטיול')}</span>
       <div class="swatches" id="f-color" role="radiogroup" aria-labelledby="f-color-l">${L.TRIP_COLORS.map(c => `<button type="button" role="radio" class="sw"
-        data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${c.name}" title="${c.name}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
-    <div class="field"><span class="lbl" id="f-theme-l">🌓 ערכת צבעים לטיול</span>
-      <div class="toggle three" role="group" aria-labelledby="f-theme-l" id="f-theme">${[['light', '☀️ בהיר'], ['dark', '🌙 כהה'], ['auto', '📱 אוטומטי']].map(([k, n]) =>
+        data-color="${c.key}" aria-checked="${L.tripColor(t.color).key === c.key}" aria-label="${T(c.name)}" title="${T(c.name)}" style="background:${tripBg(c.key)}"></button>`).join('')}</div></div>
+    <div class="field"><span class="lbl" id="f-theme-l">🌓 ${T('ערכת צבעים לטיול')}</span>
+      <div class="toggle three" role="group" aria-labelledby="f-theme-l" id="f-theme">${[['light', '☀️ ' + T('בהיר')], ['dark', '🌙 ' + T('כהה')], ['auto', '📱 ' + T('אוטומטי')]].map(([k, n]) =>
         `<button type="button" data-th="${k}" aria-pressed="${L.tripTheme(t) === k}">${n}</button>`).join('')}</div>
-      <p class="muted small">כל מי שפותח את הטיול רואה אותו כך. אוטומטי = לפי הגדרת הטלפון.</p></div>
+      <p class="muted small">${T('כל מי שפותח את הטיול רואה אותו כך. אוטומטי = לפי הגדרת הטלפון.')}</p></div>
     ${tagPickerHtml()}
     <div class="field" data-f="participants">
-      <label class="lbl" for="f-person">משתתפים * <span class="small">(⭐ = ברירת המחדל ב"מי שילם"; לחיצה על שם הופכת אותו לראשון)</span></label>
+      <label class="lbl" for="f-person">${T('משתתפים')} * <span class="small">${T('(⭐ = ברירת המחדל ב"מי שילם"; לחיצה על שם הופכת אותו לראשון)')}</span></label>
       <div class="chips" id="f-chips" style="margin-bottom:8px"></div>
-      <div class="chip-input"><input id="f-person" maxlength="30" placeholder="הקלידו שם ולחצו הוספה" autocomplete="off" enterkeyhint="done"><button type="button" class="btn ghost sm" id="f-add">הוספה</button></div>
+      <div class="chip-input"><input id="f-person" maxlength="30" placeholder="${T('הקלידו שם ולחצו הוספה')}" autocomplete="off" enterkeyhint="done"><button type="button" class="btn ghost sm" id="f-add">${T('הוספה')}</button></div>
       <p class="err"></p>
     </div>
-    ${withPin ? `<div class="field" data-f="pin"><label class="lbl" for="f-pin">סיסמת טיול (4 ספרות) *</label>
+    ${withPin ? `<div class="field" data-f="pin"><label class="lbl" for="f-pin">${T('סיסמת טיול (4 ספרות)')} *</label>
       <input id="f-pin" class="code num" style="font-size:26px;letter-spacing:10px" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off"><p class="err"></p></div>` : ''}`;
 }
 
@@ -526,11 +542,11 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
   const chips = $('#f-chips', root), input = $('#f-person', root);
   const draw = () => {
     chips.innerHTML = people.map((p, i) => `<span class="chip ${i === 0 ? 'sky' : ''}">
-      <button type="button" data-first="${i}" title="הפוך לברירת מחדל">${i === 0 ? '⭐ ' : ''}${esc(p)}</button>
-      <button type="button" data-rm="${i}" aria-label="הסרת ${esc(p)}">✕</button></span>`).join('');
+      <button type="button" data-first="${i}" title="${T('הפוך לברירת מחדל')}">${i === 0 ? '⭐ ' : ''}${esc(p)}</button>
+      <button type="button" data-rm="${i}" aria-label="${esc(T('הסרת {x}', { x: p }))}">✕</button></span>`).join('');
     $$('[data-rm]', chips).forEach(b => b.onclick = () => {
       const name = people[+b.dataset.rm];
-      if (lockedNames.has(name)) return toast(`אי אפשר להסיר את ${name}: יש לו/ה תנועות בטיול`, 'bad');
+      if (lockedNames.has(name)) return toast(T('אי אפשר להסיר את {name}: יש לו/ה תנועות בטיול', { name }), 'bad');
       people.splice(+b.dataset.rm, 1); draw();
     });
     $$('[data-first]', chips).forEach(b => b.onclick = () => { const [p] = people.splice(+b.dataset.first, 1); people.unshift(p); draw(); });
@@ -538,7 +554,7 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
   const add = () => {
     const name = input.value.trim().replace(/\s+/g, ' ');
     if (!name) return;
-    if (people.includes(name)) { toast('השם כבר ברשימה'); return; }
+    if (people.includes(name)) { toast(T('השם כבר ברשימה')); return; }
     people.push(name); input.value = ''; draw(); input.focus();
   };
   $('#f-add', root).onclick = add;
@@ -555,15 +571,15 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
   // countries: search box + suggestions from the trip name, place and the expenses' addresses
   const ctys = L.cleanCountries(t.countries);
   const ctyIn = $('#f-cty-in', root);
-  const ctyBtn = (c, cls) => `<button type="button" class="cty-btn ${cls}" data-cadd="${c}">${flagImg(c)} ${esc(L.countryName(c))}${cls === 'sug' ? ' +' : ''}</button>`;
+  const ctyBtn = (c, cls) => `<button type="button" class="cty-btn ${cls}" data-cadd="${c}">${flagImg(c)} ${esc(cName(c))}${cls === 'sug' ? ' +' : ''}</button>`;
   const drawCty = () => {
-    $('#f-cty', root).innerHTML = ctys.map((c, i) => `<span class="chip sky">${flagImg(c)} ${esc(L.countryName(c))}<button type="button" data-crm="${i}" aria-label="הסרת ${esc(L.countryName(c))}">✕</button></span>`).join('');
+    $('#f-cty', root).innerHTML = ctys.map((c, i) => `<span class="chip sky">${flagImg(c)} ${esc(cName(c))}<button type="button" data-crm="${i}" aria-label="${esc(T('הסרת {x}', { x: cName(c) }))}">✕</button></span>`).join('');
     const q = ctyIn.value.trim().toLowerCase();
     const hits = !q ? [] : L.COUNTRY_CODES.filter(c => !ctys.includes(c) && ['he', 'en', 'ru'].some(l => L.countryName(c, l).toLowerCase().includes(q)))
-      .sort((a, b) => L.countryName(a).localeCompare(L.countryName(b), 'he')).slice(0, 8);
-    $('#f-cty-list', root).innerHTML = q && !hits.length ? '<span class="muted small">לא נמצאה מדינה</span>' : hits.map(c => ctyBtn(c, '')).join('');
+      .sort((a, b) => cName(a).localeCompare(cName(b), lang)).slice(0, 8);
+    $('#f-cty-list', root).innerHTML = q && !hits.length ? `<span class="muted small">${T('לא נמצאה מדינה')}</span>` : hits.map(c => ctyBtn(c, '')).join('');
     const sug = ctys.length >= L.MAX_COUNTRIES ? [] : L.suggestCountries([$('#f-name', root).value, $('#f-loc', root).value, ...hints], ctys).slice(0, 3);
-    $('#f-cty-sug', root).innerHTML = sug.length ? `<span class="lbl2">💡 הצעה:</span>${sug.map(c => ctyBtn(c, 'sug')).join('')}` : '';
+    $('#f-cty-sug', root).innerHTML = sug.length ? `<span class="lbl2">💡 ${T('הצעה:')}</span>${sug.map(c => ctyBtn(c, 'sug')).join('')}` : '';
   };
   ctyIn.closest('.field').addEventListener('click', ev => { // on the field, not root: root may be the page, reused by later screens
     const add = ev.target.closest('[data-cadd]'), rm = ev.target.closest('[data-crm]');
@@ -583,8 +599,8 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
     $('#f-bud-cur', root).textContent = `${L.currencySymbol(cur)} ${cur}`;
     $$('[data-per]', root).forEach(x => x.setAttribute('aria-pressed', x.dataset.per === per));
     const f = v => L.formatMoney(v, cur);
-    $('#f-bud-hint', root).textContent = !(a > 0) ? '' : !days ? (per === 'day' ? 'תקציב ליום צריך תאריכי התחלה וסיום' : '')
-      : per === 'trip' ? `= ${f(L.round2(a / days))} ליום · ${days} ימים` : `= ${f(L.round2(a * days))} לכל הטיול · ${days} ימים`;
+    $('#f-bud-hint', root).textContent = !(a > 0) ? '' : !days ? (per === 'day' ? T('תקציב ליום צריך תאריכי התחלה וסיום') : '')
+      : per === 'trip' ? T('= {x} ליום · {n} ימים', { x: '\u2066' + f(L.round2(a / days)) + '\u2069', n: days }) : T('= {x} לכל הטיול · {n} ימים', { x: '\u2066' + f(L.round2(a * days)) + '\u2069', n: days });
   };
   $$('[data-per]', root).forEach(x => x.onclick = () => { per = x.dataset.per; budTouched = true; budHint(); });
   $('#f-bud', root).addEventListener('input', () => { budTouched = true; });
@@ -606,7 +622,7 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
     };
     if (pin) data.pin = pin.value;
     const errors = L.validateTrip(data);
-    $$('[data-f]', root).forEach(f => { const e = errors[f.dataset.f]; f.classList.toggle('invalid', !!e); $('.err', f).textContent = e || ''; });
+    $$('[data-f]', root).forEach(f => { const e = errors[f.dataset.f]; f.classList.toggle('invalid', !!e); $('.err', f).textContent = e ? T(e) : ''; });
     const first = $('.invalid input, .invalid select', root);
     if (first) { first.focus(); return null; }
     return data;
@@ -617,9 +633,9 @@ function bindTripForm(root, t, lockedNames = new Set(), hints = []) {
 
 function createTripPage() {
   view.innerHTML = `
-    <header class="topbar"><a class="icon-btn" href="#/" title="חזרה" aria-label="חזרה">→</a><h1>טיול חדש</h1><span style="width:44px"></span></header>
+    <header class="topbar"><a class="icon-btn" href="#/" title="${t('חזרה')}" aria-label="${t('חזרה')}">${backArrow()}</a><h1>${t('טיול חדש')}</h1><span style="width:44px"></span></header>
     <form class="wrap" novalidate><div class="card">${tripFormHtml({}, true)}
-      <button class="btn primary block">יצירת טיול</button></div></form>`;
+      <button class="btn primary block">${t('יצירת טיול')}</button></div></form>`;
   const read = bindTripForm(view, {});
   $('#f-name').focus();
   $('form', view).onsubmit = async e => {
@@ -630,7 +646,7 @@ function createTripPage() {
     const trip = { ...rest, pinHash: await hashPin(id, pin) };
     fire(store.createTripWithId(id, trip));
     grantAccess(id);
-    toast('הטיול נוצר 🎉', 'good');
+    toast(T('הטיול נוצר 🎉'), 'good');
     go('#/trip/' + id);
   };
 }
@@ -671,7 +687,7 @@ async function tripPage(id) {
     const here = () => location.hash === '#/trip/' + id; // the user may have navigated away meanwhile
     const t = await store.getTrip(id).catch(() => null);
     if (!here()) return;
-    if (!t) { toast('הטיול לא נמצא', 'bad'); return go('#/'); }
+    if (!t) { toast(T('הטיול לא נמצא'), 'bad'); return go('#/'); }
     if (L.isDeleted(t)) return deletedTripScreen(t, true);
     const ok = await unlock(t);
     if (!here()) return;
@@ -690,9 +706,9 @@ async function tripPage(id) {
     pending.flush(); // the previous toast (and its undo) is replaced
     pending.add(k, () => fire(store.deleteExpense(id, e.id, e.photoIds)));
     showList(); drawAll();
-    undoToast(`נמחק: ${e.details}`, () => {
+    undoToast(T('נמחק: {x}', { x: e.details }), () => {
       if (!pending.undo(k)) return;
-      showList(); drawAll(); toast('שוחזר', 'good');
+      showList(); drawAll(); toast(T('שוחזר'), 'good');
       $(`[data-edit="${CSS.escape(e.id)}"]`)?.closest('.tx')?.classList.add('flash');
     }, L.UNDO_MS);
   };
@@ -702,24 +718,24 @@ async function tripPage(id) {
       <header class="tripbar" id="hero"></header>
       <header class="tripbar mini-bar" id="miniBar" aria-hidden="true"></header>
       <div class="tabs" role="tablist">
-        <button role="tab" data-tab="list">הוצאות וסיכומים</button>
-        <button role="tab" data-tab="settle">התחשבנות</button>
+        <button role="tab" data-tab="list">${T('הוצאות וסיכומים')}</button>
+        <button role="tab" data-tab="settle">${T('התחשבנות')}</button>
       </div>
       <div id="tabList" class="wrap">
         <div class="stats" id="stats"></div>
-        <div class="card"><div class="card-head"><h2>פילוח</h2>
-          <div class="toggle" role="group"><button data-ch="cat">לפי קטגוריה</button><button data-ch="day">לפי יום</button></div></div>
+        <div class="card"><div class="card-head"><h2>${T('פילוח')}</h2>
+          <div class="toggle" role="group"><button data-ch="cat">${T('לפי קטגוריה')}</button><button data-ch="day">${T('לפי יום')}</button></div></div>
           <div id="chart"></div></div>
         <div class="toolbar">
-          <input class="search" id="search" type="search" placeholder="🔍 חיפוש: פירוט, הערה, קטגוריה, משלם" aria-label="חיפוש תנועות">
+          <input class="search" id="search" type="search" placeholder="🔍 ${T('חיפוש: פירוט, הערה, קטגוריה, משלם')}" aria-label="${T('חיפוש תנועות')}">
         </div>
         <div id="txList" style="display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s3)"></div>
       </div>
       <div id="tabSettle" class="hidden">
-        <div class="filter" id="who" role="group" aria-label="סינון לפי משתתף"></div>
+        <div class="filter" id="who" role="group" aria-label="${T('סינון לפי משתתף')}"></div>
         <div class="wrap" style="margin-top:var(--s3)" id="settle"></div>
       </div>
-      <button class="fab" id="fab"><span aria-hidden="true">+</span>להוסיף הוצאה</button>`;
+      <button class="fab" id="fab"><span aria-hidden="true">+</span>${T('להוסיף הוצאה')}</button>`;
     // Material-style: when the big banner scrolls away, a slim bar stays at the top.
     const io = new IntersectionObserver(([en]) => {
       const show = !en.isIntersecting && en.boundingClientRect.top < 0;
@@ -789,36 +805,36 @@ async function tripPage(id) {
   const drawHero = () => {
     const t = st.trip;
     const len = t.startDate && t.endDate ? L.daysBetween(t.startDate, t.endDate) : 0;
-    const btns = title => [`<a class="ib" href="#/" title="לכל הטיולים" aria-label="לכל הטיולים">→</a>`, title,
-      `<button class="ib" data-edit-trip title="עריכת פרטי טיול" aria-label="עריכת פרטי טיול">✏️</button>`].join('');
+    const btns = title => [`<a class="ib" href="#/" title="${T('לכל הטיולים')}" aria-label="${T('לכל הטיולים')}">${backArrow()}</a>`, title,
+      `<button class="ib" data-edit-trip title="${T('עריכת פרטי טיול')}" aria-label="${T('עריכת פרטי טיול')}">✏️</button>`].join('');
     const hero = $('#hero');
     hero.style.cssText = tripStyle(t.color);
     hero.innerHTML = `<div class="tb-row">${btns(`<h1>${esc(t.name)}</h1>`)}</div>
-      <div class="tb-meta">${flagsOf(t) || '📍'} ${esc(t.location)} · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${len} ימים` : ''}</div>
-      <div class="chips tb-chips"><button type="button" class="chip ppl" data-people title="משתתפים" aria-label="משתתפים (${t.participants.length})">👥 <span class="num">${t.participants.length}</span></button>
-        ${st.v.pair ? `<span class="cur-sw" role="group" aria-label="מטבע תצוגה">${[t.defaultCurrency, st.v.pair].map(c =>
+      <div class="tb-meta">${flagsOf(t) || '📍'} <bdi>${esc(t.location)}</bdi> · <span class="num">${esc(dateRange(t.startDate, t.endDate))}</span>${len > 0 ? ` · ${T('{n} ימים', { n: len })}` : ''}</div>
+      <div class="chips tb-chips"><button type="button" class="chip ppl" data-people title="${T('משתתפים')}" aria-label="${T('משתתפים')} (${t.participants.length})">👥 <span class="num">${t.participants.length}</span></button>
+        ${st.v.pair ? `<span class="cur-sw" role="group" aria-label="${T('מטבע תצוגה')}">${[t.defaultCurrency, st.v.pair].map(c =>
           `<button type="button" data-cur="${esc(c)}" aria-pressed="${(st.v.wait || st.v.fail ? ls.get(viewKey(id)) === 'in' ? t.defaultCurrency : st.v.pair : st.v.cur) === c}" title="${esc(c)}">${esc(L.currencySymbol(c))}</button>`).join('')}</span>`
           : `<span class="chip mint">${esc(L.currencySymbol(t.defaultCurrency))} ${esc(t.defaultCurrency)}</span>`}
-        <span class="tb-share"><button type="button" class="chip wa-chip" id="share" title="שיתוף בוואטסאפ">${WA_ICON}שיתוף</button>
-          <button type="button" class="chip pdf-chip" id="pdf" title="ייצוא PDF">📄 PDF</button></span></div>`;
+        <span class="tb-share"><button type="button" class="chip wa-chip" id="share" title="${T('שיתוף בוואטסאפ')}">${WA_ICON}${T('שיתוף')}</button>
+          <button type="button" class="chip pdf-chip" id="pdf" title="${T('ייצוא PDF')}">📄 PDF</button></span></div>`;
     const s = L.summarize(t, st.v.list, todayIso());
     const mini = $('#miniBar');
     mini.style.cssText = tripStyle(t.color);
-    mini.innerHTML = `<div class="tb-row">${btns(`<div class="tb-t"><b>${esc(t.name)}</b><span>${s.days} ימים · <bdi class="money">${esc(fmt(s.net))}</bdi></span></div>`)}</div>`;
+    mini.innerHTML = `<div class="tb-row">${btns(`<div class="tb-t"><b>${esc(t.name)}</b><span>${T('{n} ימים', { n: s.days })} · <bdi class="money">${esc(fmt(s.net))}</bdi></span></div>`)}</div>`;
   };
 
   const drawStats = () => {
     const s = L.summarize(st.v.trip, st.v.list, todayIso());
-    const t = st.trip, note = esc(st.v.cur !== t.defaultCurrency ? `💱 ב-${st.v.cur} · כל הוצאה לפי השער של היום שבו שולמה`
-      : st.v.wait ? `💱 טוען שערים ל-${st.v.pair}…` : st.v.fail ? `⚠️ אין שער ל-${st.v.pair} כרגע (אין חיבור?) – מוצג ב-${t.defaultCurrency}` : '');
+    const t = st.trip, note = esc(st.v.cur !== t.defaultCurrency ? '💱 ' + T('ב-{c} · כל הוצאה לפי השער של היום שבו שולמה', { c: st.v.cur })
+      : st.v.wait ? '💱 ' + T('טוען שערים ל-{c}…', { c: st.v.pair }) : st.v.fail ? '⚠️ ' + T('אין שער ל-{c} כרגע (אין חיבור?) – מוצג ב-{d}', { c: st.v.pair, d: t.defaultCurrency }) : '');
     $('#stats').innerHTML = `
-      <div class="card stat big"><div><div class="muted">מאזן נטו (הוצאות פחות החזרים)</div><div class="v"><span class="money">${fmt(s.net)}</span></div>${note ? `<div class="view-note">${note}</div>` : ''}</div>
-        <span class="chip sky">${s.days} ימים · ${st.expenses.length} תנועות</span></div>
+      <div class="card stat big"><div><div class="muted">${T('מאזן נטו (הוצאות פחות החזרים)')}</div><div class="v"><span class="money">${fmt(s.net)}</span></div>${note ? `<div class="view-note">${note}</div>` : ''}</div>
+        <span class="chip sky">${T('{n} ימים', { n: s.days })} · ${T('{n} תנועות', { n: st.expenses.length })}</span></div>
       ${(b => b ? budgetTile(st.v.trip, b, fmt) : '')(L.budgetSummary(st.v.trip, st.v.list, todayIso()))}
-      <div class="card stat exp"><div class="muted">סה"כ הוצאות</div><div class="v neg"><span class="money">${fmt(s.totalExpenses)}</span></div></div>
-      <div class="card stat inc"><div class="muted">הכנסות / החזרים</div><div class="v pos"><span class="money">+${fmt(s.totalIncome)}</span></div></div>
-      <div class="card stat"><div class="muted">ממוצע ליום</div><div class="v"><span class="money">${fmt(s.perDay)}</span></div></div>
-      <div class="card stat"><div class="muted">ממוצע לאדם</div><div class="v"><span class="money">${fmt(s.perPerson)}</span></div></div>`;
+      <div class="card stat exp"><div class="muted">${T('סה"כ הוצאות')}</div><div class="v neg"><span class="money">${fmt(s.totalExpenses)}</span></div></div>
+      <div class="card stat inc"><div class="muted">${T('הכנסות / החזרים')}</div><div class="v pos"><span class="money">+${fmt(s.totalIncome)}</span></div></div>
+      <div class="card stat"><div class="muted">${T('ממוצע ליום')}</div><div class="v"><span class="money">${fmt(s.perDay)}</span></div></div>
+      <div class="card stat"><div class="muted">${T('ממוצע לאדם')}</div><div class="v"><span class="money">${fmt(s.perPerson)}</span></div></div>`;
   };
 
   const drawChart = () => {
@@ -829,7 +845,7 @@ async function tripPage(id) {
     if (st.focus && !items.some(d => d.name === st.focus.name)) st.focus = null; // its last expense was deleted/moved
     const selected = st.focus?.name ?? null;
     const onSelect = name => { st.focus = name ? { kind: st.chart, name } : null; drawList(); };
-    if (st.chart === 'cat') breakdown(host, items, { fmt, label: n => `${L.categoryEmoji(n)} ${n}`, selected, onSelect });
+    if (st.chart === 'cat') breakdown(host, items, { fmt, label: n => `${L.categoryEmoji(n)} ${T(n)}`, selected, onSelect });
     else bars(host, items, { fmt, total: L.summarize(st.trip, st.v.list).totalExpenses, selected, onSelect });
     const sc = host.querySelector('.bars-scroll');
     if (sc && scrollX != null) sc.scrollLeft = scrollX;
@@ -841,16 +857,16 @@ async function tripPage(id) {
     const focusPill = n => {
       const f = st.focus;
       if (!f) return '';
-      const what = f.kind === 'cat' ? `${L.categoryEmoji(f.name)} <bdi>${esc(f.name)}</bdi>`
-        : `📅 <bdi>${esc(formatDate(f.name, { weekday: 'short', day: '2-digit', month: '2-digit' }))}</bdi>`;
-      return `<div class="focus-pill"><span>${what} · <span class="num">${n}</span> ראשונות</span>
-          <button type="button" class="x" data-unfocus title="ביטול" aria-label="ביטול הסידור">✕</button></div>`;
+      const what = f.kind === 'cat' ? `${L.categoryEmoji(f.name)} <bdi>${esc(T(f.name))}</bdi>`
+        : `📅 <bdi>${esc(formatDate(f.name, { weekday: 'short' }))}</bdi>`;
+      return `<div class="focus-pill"><span>${what} · ${T('<span class="num">{n}</span> ראשונות', { n })}</span>
+          <button type="button" class="x" data-unfocus title="${T('ביטול')}" aria-label="${T('ביטול הסידור')}">✕</button></div>`;
     };
     const list = L.sortTransactions(st.v.list.filter(e => L.matchesSearch(e, st.search)));
     if (!st.expenses.length) {
-      host.innerHTML = `<div class="empty"><div class="big">🧾</div><p>עדיין אין תנועות.<br>לחצו על + כדי להוסיף את ההוצאה הראשונה.</p></div>`; return;
+      host.innerHTML = `<div class="empty"><div class="big">🧾</div><p>${T('עדיין אין תנועות.')}<br>${T('לחצו על + כדי להוסיף את ההוצאה הראשונה.')}</p></div>`; return;
     }
-    if (!list.length) { host.innerHTML = focusPill(0) + `<div class="empty">לא נמצאו תנועות עבור "${esc(st.search)}"</div>`; return; }
+    if (!list.length) { host.innerHTML = focusPill(0) + `<div class="empty">${T('לא נמצאו תנועות עבור')} "${esc(st.search)}"</div>`; return; }
     const card = (e, dim) => {
       const inc = e.type === 'income';
       // Showing the view currency: it goes first and the paid amount under it. Otherwise the paid amount first, as before.
@@ -861,12 +877,12 @@ async function tripPage(id) {
         <div class="ic" aria-hidden="true">${inc ? '↩️' : L.categoryEmoji(e.category)}</div>
         <div class="mid">
           <div class="t clamp" data-k="${esc(e.id)}:t">${esc(e.details)}</div>
-          <div class="muted">${esc(e.category)} · ${inc ? 'התקבל ע"י' : 'שולם ע"י'} ${esc(e.paidBy)}</div>
+          <div class="muted">${esc(T(e.category))} · ${inc ? T('התקבל ע"י') : T('שולם ע"י')} <bdi>${esc(e.paidBy)}</bdi></div>
           ${e.comment ? `<div class="muted com clamp" data-k="${esc(e.id)}:c">💬 ${esc(e.comment)}</div>` : ''}
-          ${e.location ? `<a class="geo-link" href="${esc(L.mapsUrl(e.location))}" target="_blank" rel="noopener">📍 ${esc(e.address || 'מיקום במפה')}</a>` : ''}
-          <div class="acts"><button class="mini" data-edit="${esc(e.id)}" title="עריכה" aria-label="עריכה">✏️</button>
-            ${e.photoIds?.length ? `<button class="mini pics" data-pics="${esc(e.id)}" title="תמונות" aria-label="${e.photoIds.length} תמונות">📷 ${e.photoIds.length}</button>` : ''}
-            <button class="mini del" data-del="${esc(e.id)}" title="מחיקה" aria-label="מחיקה">🗑️</button></div>
+          ${e.location ? `<a class="geo-link" href="${esc(L.mapsUrl(e.location))}" target="_blank" rel="noopener">📍 ${esc(e.address || T('מיקום במפה'))}</a>` : ''}
+          <div class="acts"><button class="mini" data-edit="${esc(e.id)}" title="${T('עריכה')}" aria-label="${T('עריכה')}">✏️</button>
+            ${e.photoIds?.length ? `<button class="mini pics" data-pics="${esc(e.id)}" title="${T('תמונות')}" aria-label="${T('{n} תמונות', { n: e.photoIds.length })}">📷 ${e.photoIds.length}</button>` : ''}
+            <button class="mini del" data-del="${esc(e.id)}" title="${T('מחיקה')}" aria-label="${T('מחיקה')}">🗑️</button></div>
         </div>
         <div class="amt ${inc ? 'pos' : 'neg'}"><span class="money">${esc(big)}</span>
           ${small ? `<small class="money">${esc(small)}</small>` : ''}</div>
@@ -890,7 +906,7 @@ async function tripPage(id) {
       const f = st.focus;
       html = focusPill(first.length)
         + days(first, false)
-        + (rest.length ? `<div class="focus-sep">${f.kind === 'cat' ? 'לא בקטגוריה הנבחרת' : 'לא ביום הנבחר'} · <span class="num">${rest.length}</span></div>` + days(rest, true) : '');
+        + (rest.length ? `<div class="focus-sep">${f.kind === 'cat' ? T('לא בקטגוריה הנבחרת') : T('לא ביום הנבחר')} · <span class="num">${rest.length}</span></div>` + days(rest, true) : '');
     }
     host.innerHTML = html;
     $$('[data-edit]', host).forEach(b => b.onclick = () => expenseSheet(st, st.expenses.find(x => x.id === b.dataset.edit)));
@@ -898,7 +914,7 @@ async function tripPage(id) {
     $$('[data-pics]', host).forEach(b => b.onclick = async () => {
       const pics = await store.getPhotos(st.trip.id, b.dataset.pics).catch(err => (reportError(err), []));
       const ok = pics.map(p => p.data).filter(L.isPhotoData);
-      if (ok.length) photoViewer(ok, 0); else toast('התמונות עדיין לא סונכרנו למכשיר הזה');
+      if (ok.length) photoViewer(ok, 0); else toast(T('התמונות עדיין לא סונכרנו למכשיר הזה'));
     });
     $$('[data-del]', host).forEach(b => b.onclick = () => st.del(st.expenses.find(x => x.id === b.dataset.del)));
   };
@@ -906,7 +922,7 @@ async function tripPage(id) {
   const drawSettle = () => {
     const t = st.trip;
     if (st.who && !t.participants.includes(st.who)) st.who = '';
-    $('#who').innerHTML = ['', ...t.participants].map(p => `<button data-who="${esc(p)}" aria-pressed="${st.who === p}">${p ? esc(p) : 'כולם'}</button>`).join('');
+    $('#who').innerHTML = ['', ...t.participants].map(p => `<button data-who="${esc(p)}" aria-pressed="${st.who === p}">${p ? esc(p) : T('כולם')}</button>`).join('');
     $$('[data-who]').forEach(b => b.onclick = () => { st.who = b.dataset.who; drawSettle(); });
 
     const bal = L.balances(t.participants, st.v.list);
@@ -921,14 +937,14 @@ async function tripPage(id) {
     const solo = units.filter(u => !u.isGroup).length;
     const host = $('#settle');
     host.innerHTML = `
-      ${groups.length ? `<div class="gbar"><span>👨‍👩‍👧 ${groups.length === 1 ? 'קבוצה אחת' : `${groups.length} קבוצות`}${solo ? ` · ${solo} לבד` : ''}</span>
-          <button type="button" class="btn sm ghost" data-groups>עריכת קבוצות</button></div>`
-        : bannerOn ? `<div class="grp-banner"><button type="button" class="x" data-hide-banner title="הסתרה" aria-label="הסתרת ההודעה">✕</button>
-          <b>👨‍👩‍👧 יש בטיול זוגות או משפחות?</b>
-          <p>אפשר לאחד אנשים לקבוצה, וההתחשבנות תהיה בין הקבוצות: מי מעביר למי – פעם אחת לכל זוג.</p>
-          <button type="button" class="btn primary block" data-groups>לחלק את האנשים לקבוצות</button></div>` : ''}
-      <div class="card"><h2>${st.who ? `ההוצאות ששילם/ה ${esc(st.who)} לפי קטגוריה` : 'מי שילם כמה'}</h2><div id="pie2"></div></div>
-      <h2 style="margin:var(--s2) var(--s2) 0">יתרות</h2>
+      ${groups.length ? `<div class="gbar"><span>👨‍👩‍👧 ${groups.length === 1 ? T('קבוצה אחת') : T('{n} קבוצות', { n: groups.length })}${solo ? ` · ${T('{n} לבד', { n: solo })}` : ''}</span>
+          <button type="button" class="btn sm ghost" data-groups>${T('עריכת קבוצות')}</button></div>`
+        : bannerOn ? `<div class="grp-banner"><button type="button" class="x" data-hide-banner title="${T('הסתרה')}" aria-label="${T('הסתרת ההודעה')}">✕</button>
+          <b>👨‍👩‍👧 ${T('יש בטיול זוגות או משפחות?')}</b>
+          <p>${T('אפשר לאחד אנשים לקבוצה, וההתחשבנות תהיה בין הקבוצות: מי מעביר למי – פעם אחת לכל זוג.')}</p>
+          <button type="button" class="btn primary block" data-groups>${T('לחלק את האנשים לקבוצות')}</button></div>` : ''}
+      <div class="card"><h2>${st.who ? esc(T('ההוצאות ששילם/ה {x} לפי קטגוריה', { x: st.who })) : T('מי שילם כמה')}</h2><div id="pie2"></div></div>
+      <h2 style="margin:var(--s2) var(--s2) 0">${T('יתרות')}</h2>
       ${units.map(u => {
         const cls = u.balance > 0.009 ? 'pos' : u.balance < -0.009 ? 'neg' : 'zero';
         const ini = u.isGroup ? u.members.slice(0, 3).map(p => [...p][0] || '?').join('+') : ([...u.name][0] || '?');
@@ -936,20 +952,20 @@ async function tripPage(id) {
         return `<div class="card person ${many ? 'group' : ''} ${st.who && mine !== u.name ? 'dim' : ''}">
           <div class="ava ${many ? 'multi' : ''}" aria-hidden="true">${esc(ini)}</div>
           <div><b>${esc(u.name)}</b>${many ? `<div class="members">${u.members.map(esc).join(', ')}</div>` : ''}</div>
-          <span class="bal ${cls}" title="${cls === 'pos' ? 'מגיע' : cls === 'neg' ? 'חייב' : 'מאוזן'}"><span class="money">${u.balance > 0.009 ? '+' : ''}${fmt(u.balance)}</span></span>
-          <div class="muted"><span>${many ? 'שילמו' : 'שילם/ה'} <bdi class="money">${fmt(u.paid)}</bdi></span><span>${many ? 'חלקם' : 'חלקו/ה'} <bdi class="money">${fmt(u.share)}</bdi></span>
-            ${u.received ? `<span>${many ? 'קיבלו' : 'קיבל/ה'} החזר <bdi class="money">${fmt(u.received)}</bdi></span>` : ''}</div>
+          <span class="bal ${cls}" title="${cls === 'pos' ? T('מגיע') : cls === 'neg' ? T('חייב') : T('מאוזן')}"><span class="money">${u.balance > 0.009 ? '+' : ''}${fmt(u.balance)}</span></span>
+          <div class="muted"><span>${many ? T('שילמו') : T('שילם/ה')} <bdi class="money">${fmt(u.paid)}</bdi></span><span>${many ? T('חלקם') : T('חלקו/ה')} <bdi class="money">${fmt(u.share)}</bdi></span>
+            ${u.received ? `<span>${many ? T('קיבלו החזר') : T('קיבל/ה החזר')} <bdi class="money">${fmt(u.received)}</bdi></span>` : ''}</div>
         </div>`;
       }).join('')}
-      <div class="card"><h2>💸 מי מעביר למי ${transfers.length ? `(${transfers.length} העברות)` : ''}</h2>
-        ${!transfers.length ? `<p class="muted center">🎉 כולם מאוזנים, אין צורך בהעברות</p>` : !shown.length ? `<p class="muted center">ל${esc(st.who)} אין העברות</p>` :
-          `<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">←</span><span class="muted">${units.find(u => u.name === x.from)?.isGroup ? 'מעבירים ל' : 'מעביר/ה ל'}</span> <b>${esc(x.to)}</b>
+      <div class="card"><h2>💸 ${T('מי מעביר למי')} ${transfers.length ? `(${T('{n} העברות', { n: transfers.length })})` : ''}</h2>
+        ${!transfers.length ? `<p class="muted center">🎉 ${T('כולם מאוזנים, אין צורך בהעברות')}</p>` : !shown.length ? `<p class="muted center">${esc(T('ל{x} אין העברות', { x: st.who }))}</p>` :
+          `<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s2)">${shown.map(x => `<div class="xfer"><b>${esc(x.from)}</b> <span aria-hidden="true">${fwdArrow()}</span><span class="muted">${units.find(u => u.name === x.from)?.isGroup ? T('מעבירים ל') : T('מעביר/ה ל')}</span> <b>${esc(x.to)}</b>
             <span class="amt money">${fmt(x.amount)}</span></div>`).join('')}</div>`}
-        ${st.who && mine !== st.who ? `<p class="hint">${esc(st.who)} בקבוצה "${esc(mine)}" – מוצגות ההעברות של הקבוצה</p>` : ''}
-        <p class="hint">חלוקה שווה של ההוצאות נטו בין ${t.participants.length} המשתתפים${groups.length ? `, מקובצים ל-${units.length}` : ''}</p>
+        ${st.who && mine !== st.who ? `<p class="hint">${esc(T('{x} בקבוצה "{g}" – מוצגות ההעברות של הקבוצה', { x: st.who, g: mine }))}</p>` : ''}
+        <p class="hint">${T('חלוקה שווה של ההוצאות נטו בין {n} המשתתפים', { n: t.participants.length })}${groups.length ? T(', מקובצים ל-{n}', { n: units.length }) : ''}</p>
       </div>
-      ${!groups.length && !bannerOn ? `<div class="center" style="margin-top:var(--s2)"><button type="button" class="btn ghost" data-groups>👨‍👩‍👧 לחלק את האנשים לקבוצות</button></div>` : ''}`;
-    breakdown($('#pie2'), pieItems, { fmt, label: n => st.who ? `${L.categoryEmoji(n)} ${n}` : n });
+      ${!groups.length && !bannerOn ? `<div class="center" style="margin-top:var(--s2)"><button type="button" class="btn ghost" data-groups>👨‍👩‍👧 ${T('לחלק את האנשים לקבוצות')}</button></div>` : ''}`;
+    breakdown($('#pie2'), pieItems, { fmt, label: n => st.who ? `${L.categoryEmoji(n)} ${T(n)}` : n });
   };
 
   const drawAll = () => {
@@ -961,7 +977,7 @@ async function tripPage(id) {
 
   let gotExpenses = false;
   cleanups.push(store.onTrip(id, trip => {
-    if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
+    if (!trip) { toast(T('הטיול נמחק'), 'bad'); return go('#/'); }
     if (L.isDeleted(trip)) { st.gone = true; return deletedTripScreen(trip); }
     if (st.gone) return route(); // restored meanwhile: start the page fresh
     st.trip = trip; applyTheme(L.tripTheme(trip)); ls.set('tt-theme:' + id, L.tripTheme(trip)); if (gotExpenses) drawAll();
@@ -978,12 +994,12 @@ async function tripPage(id) {
 // A trip in the trash. Others just see "נמחק"; the manager can bring it back.
 function deletedTripScreen(t, reload = false) {
   closeAll();
-  view.innerHTML = `<header class="topbar"><a class="icon-btn" href="#/" title="חזרה" aria-label="חזרה">→</a><h1>טיול</h1></header>
-    <div class="wrap"><div class="card empty"><div class="big" aria-hidden="true">🗑️</div><h2>הטיול נמחק</h2>
-      <button class="btn ghost" id="restoreTrip">↩ שחזור (מנהל)</button></div></div>`;
+  view.innerHTML = `<header class="topbar"><a class="icon-btn" href="#/" title="${T('חזרה')}" aria-label="${T('חזרה')}">${backArrow()}</a><h1>${T('טיול')}</h1></header>
+    <div class="wrap"><div class="card empty"><div class="big" aria-hidden="true">🗑️</div><h2>${T('הטיול נמחק')}</h2>
+      <button class="btn ghost" id="restoreTrip">↩ ${T('שחזור (מנהל)')}</button></div></div>`;
   $('#restoreTrip').onclick = async () => {
-    if (!await adminCode('↩ שחזור טיול')) return;
-    fire(store.updateTrip(t.id, { deletedAt: null })); toast('הטיול שוחזר', 'good');
+    if (!await adminCode('↩ ' + T('שחזור טיול'))) return;
+    fire(store.updateTrip(t.id, { deletedAt: null })); toast(T('הטיול שוחזר'), 'good');
     if (reload && location.hash.startsWith('#/trip/')) route(); // otherwise the trip listener restarts the page
   };
 }
@@ -993,14 +1009,14 @@ const RING_C = 2 * Math.PI * 70;
 function budgetTile(trip, b, fmt) {
   const over = b.left < 0;
   const tick = b.expectedPct != null && b.elapsed > 0 && b.daysLeft > 0;
-  const right = tick ? `<span><i class="tick-key" aria-hidden="true"></i> היום אמורים להיות ב-<span class="num">${Math.round(b.expectedPct * 100)}%</span></span>`
-    : b.tripDays == null ? '' : b.daysLeft === 0 ? '<span>הטיול הסתיים</span>' : `<span><span class="num">${b.daysLeft}</span> ימים נשארו</span>`;
+  const right = tick ? `<span><i class="tick-key" aria-hidden="true"></i> ${T('היום אמורים להיות ב-<span class="num">{p}%</span>', { p: Math.round(b.expectedPct * 100) })}</span>`
+    : b.tripDays == null ? '' : b.daysLeft === 0 ? `<span>${T('הטיול הסתיים')}</span>` : `<span>${T('<span class="num">{n}</span> ימים נשארו', { n: b.daysLeft })}</span>`;
   return `<a class="card btile ${b.level}" href="#/trip/${encodeURIComponent(trip.id)}/budget">
-      <div class="b-top"><span class="b-lbl">💰 תקציב</span><span class="b-go">לפרטים ◂</span></div>
-      <div class="b-top"><span class="b-v ${over ? 'neg' : ''}"><span class="money">${esc(fmt(Math.abs(b.left)))}</span> <small>${over ? 'מעל התקציב' : 'נשארו'}</small></span>
-        <span class="b-of">${over ? 'תקציב' : 'מתוך'} <span class="money">${esc(fmt(b.total))}</span></span></div>
-      <div class="meter" role="img" aria-label="נוצלו ${Math.round(b.pct * 100)}% מהתקציב"><i style="width:${Math.min(b.pct, 1) * 100}%"></i>${tick ? `<span class="tick" style="inset-inline-start:${b.expectedPct * 100}%"></span>` : ''}</div>
-      <div class="b-legend"><span><span class="num">${Math.round(b.pct * 100)}%</span> נוצל</span>${right}</div></a>`;
+      <div class="b-top"><span class="b-lbl">💰 ${T('תקציב')}</span><span class="b-go">${T('לפרטים')} ${isRtl() ? '◂' : '▸'}</span></div>
+      <div class="b-top"><span class="b-v ${over ? 'neg' : ''}"><span class="money">${esc(fmt(Math.abs(b.left)))}</span> <small>${over ? T('מעל התקציב') : T('נשארו')}</small></span>
+        <span class="b-of">${over ? T('תקציב') : T('מתוך')} <span class="money">${esc(fmt(b.total))}</span></span></div>
+      <div class="meter" role="img" aria-label="${T('נוצלו {p}% מהתקציב', { p: Math.round(b.pct * 100) })}"><i style="width:${Math.min(b.pct, 1) * 100}%"></i>${tick ? `<span class="tick" style="inset-inline-start:${b.expectedPct * 100}%"></span>` : ''}</div>
+      <div class="b-legend"><span><span class="num">${Math.round(b.pct * 100)}%</span> ${T('נוצל')}</span>${right}</div></a>`;
 }
 
 async function budgetPage(id) {
@@ -1018,65 +1034,66 @@ async function budgetPage(id) {
     const v = vs.compute(st.trip, st.expenses); cur = v.cur;
     const t = v.trip, b = L.budgetSummary(t, v.list, todayIso());
     const head = `<header class="bhead" style="${tripStyle(t.color)}"><div class="bh-row">
-        <a class="ib" href="#/trip/${encodeURIComponent(t.id)}" title="חזרה לטיול" aria-label="חזרה לטיול">→</a>
-        <h1>💰 תקציב · <bdi>${esc(t.name)}</bdi></h1>
-        <button type="button" class="ib" data-edit-budget title="עריכת התקציב" aria-label="עריכת התקציב">✏️</button></div></header>`;
+        <a class="ib" href="#/trip/${encodeURIComponent(t.id)}" title="${T('חזרה לטיול')}" aria-label="${T('חזרה לטיול')}">${backArrow()}</a>
+        <h1>💰 ${T('תקציב')} · <bdi>${esc(t.name)}</bdi></h1>
+        <button type="button" class="ib" data-edit-budget title="${T('עריכת התקציב')}" aria-label="${T('עריכת התקציב')}">✏️</button></div></header>`;
     if (!b) {
-      view.innerHTML = head + `<div class="wrap"><div class="empty"><div class="big">💰</div><p>אין תקציב לטיול הזה.</p>
-        <button type="button" class="btn primary" data-edit-budget>✏️ להוסיף תקציב</button></div></div>`;
+      view.innerHTML = head + `<div class="wrap"><div class="empty"><div class="big">💰</div><p>${T('אין תקציב לטיול הזה.')}</p>
+        <button type="button" class="btn primary" data-edit-budget>✏️ ${T('להוסיף תקציב')}</button></div></div>`;
       return bind();
     }
-    const tabs = `<div class="tabs" role="tablist"><button role="tab" data-bmode="total" aria-selected="${st.mode === 'total'}">סה"כ</button>
-      <button role="tab" data-bmode="day" aria-selected="${st.mode === 'day'}">לפי יום</button></div>`;
+    const tabs = `<div class="tabs" role="tablist"><button role="tab" data-bmode="total" aria-selected="${st.mode === 'total'}">${T('סה"כ')}</button>
+      <button role="tab" data-bmode="day" aria-selected="${st.mode === 'day'}">${T('לפי יום')}</button></div>`;
     let body = '';
     if (st.mode === 'total') {
       const col = { ok: '#047857', warn: '#F59E0B', over: '#BE123C' }[b.level];
       const over = b.left < 0;
       const diff = b.avgPerDay != null && b.daily != null ? round(b.avgPerDay - b.daily) : null;
       body = `<div class="card b-main">
-          <svg class="ring" width="170" height="170" viewBox="0 0 170 170" role="img" aria-label="נוצלו ${Math.round(b.pct * 100)}% מהתקציב">
+          <svg class="ring" width="170" height="170" viewBox="0 0 170 170" role="img" aria-label="${T('נוצלו {p}% מהתקציב', { p: Math.round(b.pct * 100) })}">
             <circle cx="85" cy="85" r="70" fill="none" stroke="var(--track)" stroke-width="16"/>
             <circle cx="85" cy="85" r="70" fill="none" stroke="${col}" stroke-width="16" stroke-linecap="round" stroke-dasharray="${Math.min(b.pct, 1) * RING_C} ${RING_C}" transform="rotate(-90 85 85)"/>
-            <text x="85" y="84" text-anchor="middle" class="ring-v">${Math.round(b.pct * 100)}%</text><text x="85" y="108" text-anchor="middle" class="ring-s">נוצל</text></svg>
+            <text x="85" y="84" text-anchor="middle" class="ring-v">${Math.round(b.pct * 100)}%</text><text x="85" y="108" text-anchor="middle" class="ring-s">${T('נוצל')}</text></svg>
           <div class="b-big ${over ? 'neg' : ''}"><span class="money">${esc(fmt(Math.abs(b.left)))}</span></div>
-          <div class="muted center">${over ? 'מעל התקציב של' : 'נשארו מתוך'} <span class="money">${esc(fmt(b.total))}</span></div></div>
+          <div class="muted center">${over ? T('מעל התקציב של') : T('נשארו מתוך')} <span class="money">${esc(fmt(b.total))}</span></div></div>
         <div class="row2 b-kv">
-          <div class="card"><span class="muted">הוצאנו</span><b><span class="money">${esc(fmt(b.spent))}</span></b></div>
-          ${b.tripDays ? `<div class="card"><span class="muted">ימים שנשארו</span><b>${b.daysLeft === 0 ? 'הטיול הסתיים' : `<span class="num">${b.daysLeft}</span> מתוך <span class="num">${b.tripDays}</span>`}</b></div>` : ''}
-          ${b.avgPerDay != null ? `<div class="card"><span class="muted">ממוצע ליום עד עכשיו</span><b><span class="money">${esc(short(b.avgPerDay))}</span>
+          <div class="card"><span class="muted">${T('הוצאנו')}</span><b><span class="money">${esc(fmt(b.spent))}</span></b></div>
+          ${b.tripDays ? `<div class="card"><span class="muted">${T('ימים שנשארו')}</span><b>${b.daysLeft === 0 ? T('הטיול הסתיים') : T('<span class="num">{a}</span> מתוך <span class="num">{b}</span>', { a: b.daysLeft, b: b.tripDays })}</b></div>` : ''}
+          ${b.avgPerDay != null ? `<div class="card"><span class="muted">${T('ממוצע ליום עד עכשיו')}</span><b><span class="money">${esc(short(b.avgPerDay))}</span>
             ${diff ? `<small class="${diff > 0 ? 'neg' : 'pos'}">${diff > 0 ? '▲' : '▼'} <span class="num">${Math.abs(Math.round(diff))}</span></small>` : ''}</b></div>` : ''}
-          ${b.daily != null ? `<div class="card"><span class="muted">תקציב ליום</span><b><span class="money">${esc(short(b.daily))}</span></b></div>` : ''}
+          ${b.daily != null ? `<div class="card"><span class="muted">${T('תקציב ליום')}</span><b><span class="money">${esc(short(b.daily))}</span></b></div>` : ''}
         </div>
         ${b.allowedPerDay != null ? (over
-          ? `<div class="b-tip warn">⚠️ כבר מעל התקציב ב-<b><span class="money">${esc(fmt(-b.left))}</span></b>.</div>`
-          : `<div class="b-tip">👉 כדי לעמוד בתקציב: עד <b><span class="money">${esc(short(b.allowedPerDay))}</span></b> ליום ב-<span class="num">${b.daysLeft}</span> ${b.daysLeft === 1 ? 'היום שנשאר' : 'הימים שנשארו'}.</div>`) : ''}
+          ? `<div class="b-tip warn">⚠️ ${T('כבר מעל התקציב ב-{x}.', { x: `<b><span class="money">${esc(fmt(-b.left))}</span></b>` })}</div>`
+          : `<div class="b-tip">👉 ${b.daysLeft === 1 ? T('כדי לעמוד בתקציב: עד {x} ליום ביום שנשאר.', { x: `<b><span class="money">${esc(short(b.allowedPerDay))}</span></b>` })
+            : T('כדי לעמוד בתקציב: עד {x} ליום ב-{n} הימים שנשארו.', { x: `<b><span class="money">${esc(short(b.allowedPerDay))}</span></b>`, n: `<span class="num">${b.daysLeft}</span>` })}</div>`) : ''}
         ${b.projection != null ? (b.projection > b.total
-          ? `<div class="b-tip warn">📈 בקצב הנוכחי הטיול יעלה בערך <b><span class="money">${esc(short(b.projection))}</span></b> – <span class="money">${esc(short(b.projection - b.total))}</span> מעל התקציב.</div>`
-          : `<div class="b-tip good">📈 בקצב הנוכחי הטיול יעלה בערך <b><span class="money">${esc(short(b.projection))}</span></b> – בתוך התקציב 👍</div>`) : ''}
-        ${!b.tripDays ? `<p class="muted small center">בלי תאריכי טיול אין חישוב ליום. אפשר להוסיף תאריכים ב-✏️.</p>` : ''}`;
+          ? `<div class="b-tip warn">📈 ${T('בקצב הנוכחי הטיול יעלה בערך {x} – {y} מעל התקציב.', { x: `<b><span class="money">${esc(short(b.projection))}</span></b>`, y: `<span class="money">${esc(short(b.projection - b.total))}</span>` })}</div>`
+          : `<div class="b-tip good">📈 ${T('בקצב הנוכחי הטיול יעלה בערך {x} – בתוך התקציב', { x: `<b><span class="money">${esc(short(b.projection))}</span></b>` })} 👍</div>`) : ''}
+        ${!b.tripDays ? `<p class="muted small center">${T('בלי תאריכי טיול אין חישוב ליום. אפשר להוסיף תאריכים ב-✏️.')}</p>` : ''}`;
     } else if (!b.tripDays) {
-      body = `<div class="empty"><div class="big">📅</div><p>כדי לראות תקציב לפי יום צריך תאריכי התחלה וסיום לטיול.</p>
-        <button type="button" class="btn primary" data-edit-budget>✏️ להוסיף תאריכים</button></div>`;
+      body = `<div class="empty"><div class="big">📅</div><p>${T('כדי לראות תקציב לפי יום צריך תאריכי התחלה וסיום לטיול.')}</p>
+        <button type="button" class="btn primary" data-edit-budget>✏️ ${T('להוסיף תאריכים')}</button></div>`;
     } else {
       const max = Math.max(b.daily * 1.25, ...b.days.map(d => d.spent), ...b.days.map(d => d.allowed || 0)) || 1;
       const pastDays = b.days.filter(d => !d.future);
       const nOver = pastDays.filter(d => d.spent > b.daily).length;
-      body = `<div class="card b-daily"><div><span class="muted">תקציב ליום</span><b><span class="money">${esc(short(b.daily))}</span></b></div>
-          ${b.avgPerDay != null ? `<div class="b-end"><span class="muted">ממוצע בפועל</span><b class="${b.avgPerDay > b.daily ? 'neg' : 'pos'}"><span class="money">${esc(short(b.avgPerDay))}</span></b></div>` : ''}</div>
+      body = `<div class="card b-daily"><div><span class="muted">${T('תקציב ליום')}</span><b><span class="money">${esc(short(b.daily))}</span></b></div>
+          ${b.avgPerDay != null ? `<div class="b-end"><span class="muted">${T('ממוצע בפועל')}</span><b class="${b.avgPerDay > b.daily ? 'neg' : 'pos'}"><span class="money">${esc(short(b.avgPerDay))}</span></b></div>` : ''}</div>
         <div class="card b-days">${b.days.map(d => {
-          const label = `${d.today ? '<b>היום</b> ' : ''}${esc(formatDate(d.date, { weekday: 'short', day: 'numeric', month: 'numeric' }))}`;
+          const label = `${d.today ? `<b>${T('היום')}</b> ` : ''}${esc(formatDate(d.date, { weekday: 'short' }))}`;
           const w = d.future ? (d.allowed || 0) / max * 100 : Math.max(d.spent, 0) / max * 100;
           const cls = d.future ? 'f' : d.spent > b.daily ? 'o' : '';
-          const amt = d.future ? `<span class="money">${esc(short(d.allowed || 0))}</span><small>מותר</small>`
+          const amt = d.future ? `<span class="money">${esc(short(d.allowed || 0))}</span><small>${T('מותר')}</small>`
             : `<span class="money">${esc(short(d.spent))}</span><small class="${d.diff > 0 ? 'neg' : 'pos'}">${d.diff > 0 ? '▲' : '▼'} <span class="num">${Math.abs(Math.round(d.diff))}</span></small>`;
           return `<button type="button" class="drow ${d.today ? 'today' : ''} ${d.future ? 'fut' : ''}" data-day="${esc(d.date)}" ${d.future ? 'disabled' : ''}>
             <span class="d-lbl">${label}</span><span class="bar"><i class="${cls}" style="width:${w}%"></i><span class="line" style="inset-inline-start:${b.daily / max * 100}%"></span></span>
             <span class="amt">${amt}</span></button>`;
         }).join('')}
-          ${b.outside ? `<div class="drow out"><span class="d-lbl">מחוץ לתאריכי הטיול</span><span></span><span class="amt"><span class="money">${esc(short(b.outside))}</span></span></div>` : ''}
-          <div class="b-legend"><span><i class="tick-key" aria-hidden="true"></i> קו = <span class="money">${esc(short(b.daily))}</span> ליום</span>
-            <span><span class="num">${pastDays.length - nOver}</span> ימים בתקציב · <span class="num">${nOver}</span> מעל</span></div></div>
-        <p class="muted small center">לחיצה על יום מציגה את ההוצאות שלו בדף הטיול.</p>`;
+          ${b.outside ? `<div class="drow out"><span class="d-lbl">${T('מחוץ לתאריכי הטיול')}</span><span></span><span class="amt"><span class="money">${esc(short(b.outside))}</span></span></div>` : ''}
+          <div class="b-legend"><span><i class="tick-key" aria-hidden="true"></i> ${T('קו = {x} ליום', { x: `<span class="money">${esc(short(b.daily))}</span>` })}</span>
+            <span>${T('<span class="num">{a}</span> ימים בתקציב · <span class="num">{b}</span> מעל', { a: pastDays.length - nOver, b: nOver })}</span></div></div>
+        <p class="muted small center">${T('לחיצה על יום מציגה את ההוצאות שלו בדף הטיול.')}</p>`;
     }
     view.innerHTML = head + tabs + `<div class="wrap">${body}</div>`;
     bind();
@@ -1091,7 +1108,7 @@ async function budgetPage(id) {
     });
   };
   cleanups.push(store.onTrip(id, trip => {
-    if (!trip) { toast('הטיול נמחק', 'bad'); return go('#/'); }
+    if (!trip) { toast(T('הטיול נמחק'), 'bad'); return go('#/'); }
     if (L.isDeleted(trip)) return go('#/trip/' + encodeURIComponent(id)); // the trip page shows "הטיול נמחק"
     st.trip = trip; gotT = true; applyTheme(L.tripTheme(trip)); draw();
   }, reportError));
@@ -1106,10 +1123,10 @@ function tripStyle(key) { const c = L.tripColor(key); return `background:${tripB
 function peoplePopup(st) {
   const t = st.trip;
   const groupOf = Object.fromEntries(L.cleanGroups(t.groups, t.participants).flatMap(g => g.members.map(p => [p, g.name])));
-  const m = modal(`<h2>👥 משתתפים (${t.participants.length})</h2>
+  const m = modal(`<h2>👥 ${T('משתתפים')} (${t.participants.length})</h2>
     <ul class="people-list">${t.participants.map(p => `<li><span class="ava" aria-hidden="true">${esc([...p][0] || '?')}</span><span class="pn">${esc(p)}</span>
       ${groupOf[p] ? `<span class="chip">${esc(groupOf[p])}</span>` : ''}</li>`).join('')}</ul>
-    <div class="row2"><button class="btn ghost" data-g>👨‍👩‍👧 לחלק לקבוצות</button><button class="btn primary" data-x>סגירה</button></div>`, { label: 'משתתפים' });
+    <div class="row2"><button class="btn ghost" data-g>👨‍👩‍👧 ${T('לחלק לקבוצות')}</button><button class="btn primary" data-x>${T('סגירה')}</button></div>`, { label: T('משתתפים') });
   $('[data-x]', m.el).onclick = () => m.close();
   $('[data-g]', m.el).onclick = () => { m.close(); groupsSheet(st); };
 }
@@ -1124,21 +1141,21 @@ function groupsSheet(st) {
     members: (g.members || []).filter(p => inTrip.has(p) && !seen.has(p) && seen.add(p))
   })).filter(g => g.members.length).slice(0, L.MAX_GROUPS);
   let active = 0;
-  const m = modal(`<h2>חלוקה לקבוצות</h2><p class="muted" style="margin:-8px 0 var(--s3)">כל אדם יכול להיות בקבוצה אחת בלבד. מי שלא בקבוצה מתחשבן לבד.</p>
+  const m = modal(`<h2>${T('חלוקה לקבוצות')}</h2><p class="muted" style="margin:-8px 0 var(--s3)">${T('כל אדם יכול להיות בקבוצה אחת בלבד. מי שלא בקבוצה מתחשבן לבד.')}</p>
     <div id="g-body"></div>
-    <div class="row2" style="margin-top:var(--s4)"><button class="btn ghost" data-x>ביטול</button><button class="btn primary" data-save>שמירה</button></div>`, { sheet: true, label: 'חלוקה לקבוצות' });
+    <div class="row2" style="margin-top:var(--s4)"><button class="btn ghost" data-x>${T('ביטול')}</button><button class="btn primary" data-save>${T('שמירה')}</button></div>`, { sheet: true, label: T('חלוקה לקבוצות') });
   const body = $('#g-body', m.el);
   const draw = () => {
     const used = new Set(groups.flatMap(g => g.members));
     const free = t.participants.filter(p => !used.has(p));
     active = Math.max(0, Math.min(active, groups.length - 1));
     body.innerHTML = `${groups.map((g, i) => `<div class="grp ${i === active ? 'on' : ''}" data-act="${i}" style="--g:${GROUP_COLORS[i]}">
-        <div class="grp-head"><i aria-hidden="true"></i><input data-name="${i}" maxlength="40" value="${esc(g.name)}" placeholder="${esc(L.groupName(g.members) || `קבוצה ${i + 1}`)}" aria-label="שם הקבוצה">
-          <button type="button" class="mini" data-delg="${i}" title="מחיקת קבוצה" aria-label="מחיקת קבוצה">🗑️</button></div>
-        <div class="chips">${g.members.length ? g.members.map(p => `<span class="chip in"><span>${esc(p)}</span><button type="button" data-out="${esc(p)}" aria-label="הוצאת ${esc(p)} מהקבוצה">✕</button></span>`).join('')
-          : `<span class="muted">${i === active ? 'לחצו על שם למטה כדי להוסיף' : 'לחצו כאן ואז על שם למטה'}</span>`}</div></div>`).join('')}
-      <button type="button" class="add-grp" data-newg ${groups.length >= L.MAX_GROUPS ? 'disabled' : ''}>+ קבוצה חדשה (${groups.length} מתוך ${L.MAX_GROUPS})</button>
-      <div class="pool"><div class="pool-l">${free.length ? (groups.length ? 'בלי קבוצה – לחיצה מוסיפה לקבוצה המסומנת' : 'בלי קבוצה – לחיצה פותחת קבוצה חדשה') : 'כולם בקבוצות 👍'}</div>
+        <div class="grp-head"><i aria-hidden="true"></i><input data-name="${i}" maxlength="40" value="${esc(g.name)}" placeholder="${esc(L.groupName(g.members) || T('קבוצה {n}', { n: i + 1 }))}" aria-label="${T('שם הקבוצה')}">
+          <button type="button" class="mini" data-delg="${i}" title="${T('מחיקת קבוצה')}" aria-label="${T('מחיקת קבוצה')}">🗑️</button></div>
+        <div class="chips">${g.members.length ? g.members.map(p => `<span class="chip in"><span>${esc(p)}</span><button type="button" data-out="${esc(p)}" aria-label="${esc(T('הוצאת {x} מהקבוצה', { x: p }))}">✕</button></span>`).join('')
+          : `<span class="muted">${i === active ? T('לחצו על שם למטה כדי להוסיף') : T('לחצו כאן ואז על שם למטה')}</span>`}</div></div>`).join('')}
+      <button type="button" class="add-grp" data-newg ${groups.length >= L.MAX_GROUPS ? 'disabled' : ''}>+ ${T('קבוצה חדשה ({a} מתוך {b})', { a: groups.length, b: L.MAX_GROUPS })}</button>
+      <div class="pool"><div class="pool-l">${free.length ? (groups.length ? T('בלי קבוצה – לחיצה מוסיפה לקבוצה המסומנת') : T('בלי קבוצה – לחיצה פותחת קבוצה חדשה')) : T('כולם בקבוצות') + ' 👍'}</div>
         <div class="chips">${free.map(p => `<button type="button" class="chip" data-in="${esc(p)}">${esc(p)} ＋</button>`).join('')}</div></div>`;
   };
   body.addEventListener('input', e => { const i = e.target.dataset.name; if (i != null) groups[+i].name = e.target.value; });
@@ -1162,15 +1179,15 @@ function groupsSheet(st) {
   $('[data-save]', m.el).onclick = () => {
     const out = groups.filter(g => g.members.length).map(g => ({ name: g.name.trim(), members: g.members }));
     fire(store.updateTrip(t.id, { groups: out }));
-    m.close(); toast(out.length ? 'הקבוצות נשמרו' : 'הקבוצות נמחקו', 'good');
+    m.close(); toast(out.length ? T('הקבוצות נשמרו') : T('הקבוצות נמחקו'), 'good');
   };
 }
 
 function editTripSheet(st) {
   const t = st.trip;
   const locked = new Set(st.expenses.map(e => e.paidBy));
-  const m = modal(`<h2>עריכת פרטי טיול</h2><form novalidate>${tripFormHtml(t, false)}
-    <div class="row2"><button type="button" class="btn ghost" data-x>ביטול</button><button class="btn primary">שמירה</button></div></form>`, { sheet: true, label: 'עריכת פרטי טיול' });
+  const m = modal(`<h2>${T('עריכת פרטי טיול')}</h2><form novalidate>${tripFormHtml(t, false)}
+    <div class="row2"><button type="button" class="btn ghost" data-x>${T('ביטול')}</button><button class="btn primary">${T('שמירה')}</button></div></form>`, { sheet: true, label: T('עריכת פרטי טיול') });
   const read = bindTripForm(m.el, t, locked, [...new Set(st.expenses.map(e => e.address).filter(Boolean))].slice(0, 40));
   $('[data-x]', m.el).onclick = () => m.close();
   $('form', m.el).onsubmit = async e => {
@@ -1182,13 +1199,14 @@ function editTripSheet(st) {
     // A budget the user did not touch is in the old currency and gets converted with the expenses.
     const convertBudget = !!(data.budget && t.budget && !read.budgetTouched());
     if (data.defaultCurrency !== t.defaultCurrency && (st.expenses.length || convertBudget)) {
-      btn.disabled = true; btn.textContent = 'טוען שער…';
+      btn.disabled = true; btn.textContent = T('טוען שער…');
       let r;
       try { r = await getRate(t.defaultCurrency, data.defaultCurrency); }
-      catch { btn.disabled = false; btn.textContent = 'שמירה'; return toast('אין שער המרה כרגע (אין חיבור?). נסו שוב מאוחר יותר', 'bad'); }
-      btn.disabled = false; btn.textContent = 'שמירה';
-      const ok = await confirmBox('החלפת מטבע הטיול',
-        `${st.expenses.length ? `כל ${st.expenses.length} התנועות${convertBudget ? ' והתקציב' : ''} יומרו` : 'התקציב יומר'} מ-${t.defaultCurrency} ל-${data.defaultCurrency} לפי שער ${r.rate.toFixed(4)}${r.source === 'cache' ? ' (שער שמור)' : ''}. להמשיך?`);
+      catch { btn.disabled = false; btn.textContent = T('שמירה'); return toast(T('אין שער המרה כרגע (אין חיבור?). נסו שוב מאוחר יותר'), 'bad'); }
+      btn.disabled = false; btn.textContent = T('שמירה');
+      const what = st.expenses.length ? (convertBudget ? T('כל {n} התנועות והתקציב יומרו', { n: st.expenses.length }) : T('כל {n} התנועות יומרו', { n: st.expenses.length })) : T('התקציב יומר');
+      const ok = await confirmBox(T('החלפת מטבע הטיול'),
+        T('{what} מ-{a} ל-{b} לפי שער {r}{c}. להמשיך?', { what, a: t.defaultCurrency, b: data.defaultCurrency, r: r.rate.toFixed(4), c: r.source === 'cache' ? ' ' + T('(שער שמור)') : '' }));
       if (!ok) return;
       // Expenses first; the trip's currency and budget only after they succeed, so they never disagree.
       const { defaultCurrency, budget, ...rest } = data;
@@ -1196,11 +1214,11 @@ function editTripSheet(st) {
       fire(store.updateTrip(t.id, rest));
       fire(store.updateExpenses(t.id, st.expenses.map(x => ({ id: x.id, patch: L.reconvert(x, defaultCurrency, r.rate) })))
         .then(() => store.updateTrip(t.id, { defaultCurrency, budget: newBudget })));
-      m.close(); toast('הפרטים נשמרו', 'good');
+      m.close(); toast(T('הפרטים נשמרו'), 'good');
       return;
     }
     fire(store.updateTrip(t.id, data));
-    m.close(); toast('הפרטים נשמרו', 'good');
+    m.close(); toast(T('הפרטים נשמרו'), 'good');
   };
 }
 
@@ -1210,53 +1228,53 @@ function expenseSheet(st, existing, type = 'expense') {
   const e = existing || { type, currency: t.defaultCurrency, date: todayIso(), paidBy: t.participants[0], category: '', details: '', comment: '' };
   const r = { rate: existing ? existing.exchangeRateToTripDefault : 1, source: existing ? 'saved' : 'live', at: 0, manual: false };
   const m = modal(`
-    <h2>${existing ? 'עריכת תנועה' : 'הוספת תנועה'}</h2>
-    ${existing ? '' : `<button type="button" class="scan-bar" id="x-scan" aria-expanded="false" aria-controls="x-scan-menu"><span aria-hidden="true">📷</span> סריקת קבלה</button>
+    <h2>${existing ? T('עריכת תנועה') : T('הוספת תנועה')}</h2>
+    ${existing ? '' : `<button type="button" class="scan-bar" id="x-scan" aria-expanded="false" aria-controls="x-scan-menu"><span aria-hidden="true">📷</span> ${T('סריקת קבלה')}</button>
       <div class="scan-menu hidden" id="x-scan-menu" role="menu">
-        <button type="button" role="menuitem" data-scan="cam">📷 צילום עכשיו</button>
-        <button type="button" role="menuitem" data-scan="gal">🖼️ מהגלריה</button></div>
+        <button type="button" role="menuitem" data-scan="cam">📷 ${T('צילום עכשיו')}</button>
+        <button type="button" role="menuitem" data-scan="gal">🖼️ ${T('מהגלריה')}</button></div>
       <input type="file" id="x-scan-cam" accept="image/*" capture="environment" hidden>
       <input type="file" id="x-scan-gal" accept="image/*" hidden>
       <div class="scan-st hidden" id="x-scan-st" aria-live="polite"></div>`}
     <form novalidate>
-      <div class="type-toggle" role="group" aria-label="סוג תנועה">
-        <button type="button" data-t="expense">הוצאה</button><button type="button" data-t="income">הכנסה / החזר</button></div>
+      <div class="type-toggle" role="group" aria-label="${T('סוג תנועה')}">
+        <button type="button" data-t="expense">${T('הוצאה')}</button><button type="button" data-t="income">${T('הכנסה / החזר')}</button></div>
       <div class="amount-row field">
-        <div data-f="amount"><label class="lbl" for="x-amt">סכום *</label>
+        <div data-f="amount"><label class="lbl" for="x-amt">${T('סכום')} *</label>
           <input id="x-amt" class="amount num" inputmode="decimal" autocomplete="off" placeholder="0" value="${existing ? e.amount : ''}"><p class="err"></p></div>
-        <div><label class="lbl" for="x-cur">מטבע *</label><select id="x-cur">${L.CURRENCIES.map(c => `<option ${c.code === e.currency ? 'selected' : ''}>${c.code}</option>`).join('')}</select></div>
+        <div><label class="lbl" for="x-cur">${T('מטבע')} *</label><select id="x-cur">${L.CURRENCIES.map(c => `<option ${c.code === e.currency ? 'selected' : ''}>${c.code}</option>`).join('')}</select></div>
       </div>
       <div class="rate-box hidden" id="x-rate" aria-live="polite"></div>
-      <div class="field" data-f="category"><label class="lbl" for="x-cat">קטגוריה *</label>
+      <div class="field" data-f="category"><label class="lbl" for="x-cat">${T('קטגוריה')} *</label>
         <select id="x-cat"></select>
         <div class="newcat hidden" id="x-newcat">
-          <input id="x-newcat-in" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="שם הקטגוריה החדשה" aria-label="שם הקטגוריה החדשה">
-          <button type="button" class="btn primary sm" id="x-newcat-add">להוסיף</button>
-          <button type="button" class="x" id="x-newcat-x" title="ביטול" aria-label="ביטול">✕</button>
+          <input id="x-newcat-in" maxlength="40" autocomplete="off" enterkeyhint="done" placeholder="${T('שם הקטגוריה החדשה')}" aria-label="${T('שם הקטגוריה החדשה')}">
+          <button type="button" class="btn primary sm" id="x-newcat-add">${T('להוסיף')}</button>
+          <button type="button" class="x" id="x-newcat-x" title="${T('ביטול')}" aria-label="${T('ביטול')}">✕</button>
         </div><p class="err"></p></div>
       <div class="row2 field">
-        <div data-f="date"><label class="lbl" for="x-date">תאריך *</label><input id="x-date" type="date" value="${esc(e.date)}"><p class="err"></p></div>
-        <div data-f="paidBy"><label class="lbl" for="x-who" id="x-who-lbl">מי שילם *</label><select id="x-who">${t.participants.map(p => `<option ${p === e.paidBy ? 'selected' : ''}>${esc(p)}</option>`).join('')}
+        <div data-f="date"><label class="lbl" for="x-date">${T('תאריך')} *</label><input id="x-date" type="date" value="${esc(e.date)}"><p class="err"></p></div>
+        <div data-f="paidBy"><label class="lbl" for="x-who" id="x-who-lbl">${T('מי שילם')} *</label><select id="x-who">${t.participants.map(p => `<option ${p === e.paidBy ? 'selected' : ''}>${esc(p)}</option>`).join('')}
           ${existing && !t.participants.includes(e.paidBy) ? `<option selected>${esc(e.paidBy)}</option>` : ''}</select><p class="err"></p></div>
       </div>
-      <div class="field" data-f="details"><label class="lbl" for="x-det">פירוט *</label><input id="x-det" maxlength="120" placeholder='למשל: כרטיסים לרכבל' value="${esc(e.details)}"><p class="err"></p></div>
-      <div class="field"><label class="lbl" for="x-com">הערה</label><input id="x-com" maxlength="200" placeholder="אופציונלי" value="${esc(e.comment || '')}"></div>
+      <div class="field" data-f="details"><label class="lbl" for="x-det">${T('פירוט')} *</label><input id="x-det" maxlength="120" placeholder="${T('למשל: כרטיסים לרכבל')}" value="${esc(e.details)}"><p class="err"></p></div>
+      <div class="field"><label class="lbl" for="x-com">${T('הערה')}</label><input id="x-com" maxlength="200" placeholder="${T('אופציונלי')}" value="${esc(e.comment || '')}"></div>
       <div class="geo-box" id="x-geo" aria-live="polite"></div>
-      <div class="field"><span class="lbl">תמונות (עד ${L.MAX_PHOTOS})</span><div class="photos" id="x-photos"></div>
+      <div class="field"><span class="lbl">${T('תמונות (עד {n})', { n: L.MAX_PHOTOS })}</span><div class="photos" id="x-photos"></div>
         <input type="file" id="x-cam" accept="image/*" capture="environment" hidden>
         <input type="file" id="x-gal" accept="image/*" multiple hidden></div>
       <div class="${existing ? 'row2' : ''}" style="${existing ? 'grid-template-columns:auto 1fr 1fr' : 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)'}">
-        ${existing ? '<button type="button" class="btn danger" data-del title="מחיקה">🗑️</button>' : ''}
-        <button type="button" class="btn ghost" data-x>ביטול</button><button class="btn primary" id="x-save">שמירה</button>
+        ${existing ? `<button type="button" class="btn danger" data-del title="${T('מחיקה')}">🗑️</button>` : ''}
+        <button type="button" class="btn ghost" data-x>${T('ביטול')}</button><button class="btn primary" id="x-save">${T('שמירה')}</button>
       </div>
-    </form>`, { sheet: true, label: existing ? 'עריכת תנועה' : 'הוספת תנועה' });
+    </form>`, { sheet: true, label: existing ? T('עריכת תנועה') : T('הוספת תנועה') });
   const el = m.el;
   let kind = e.type;
   const amt = $('#x-amt', el), cur = $('#x-cur', el), box = $('#x-rate', el), cat = $('#x-cat', el);
 
   const drawType = () => {
     $$('[data-t]', el).forEach(b => b.setAttribute('aria-pressed', b.dataset.t === kind));
-    $('#x-who-lbl', el).textContent = kind === 'income' ? 'מי קיבל *' : 'מי שילם *';
+    $('#x-who-lbl', el).textContent = (kind === 'income' ? T('מי קיבל') : T('מי שילם')) + ' *';
   };
   $$('[data-t]', el).forEach(b => b.onclick = () => { kind = b.dataset.t; drawType(); });
   drawType();
@@ -1265,10 +1283,10 @@ function expenseSheet(st, existing, type = 'expense') {
   const drawRate = () => {
     if (cur.value === t.defaultCurrency) { box.classList.add('hidden'); return; }
     box.classList.remove('hidden', 'warn');
-    if (r.loading) { box.textContent = '💱 טוען שער יציג…'; return; }
+    if (r.loading) { box.textContent = '💱 ' + T('טוען שער יציג…'); return; }
     if (!(r.rate > 0)) {
       box.classList.add('warn');
-      box.innerHTML = `⚠️ אין חיבור לשער חי ואין שער שמור. הזינו שער ידני: 1 ${cur.value} = <input id="x-man" inputmode="decimal" aria-label="שער ידני"> ${t.defaultCurrency}`;
+      box.innerHTML = `⚠️ ${T('אין חיבור לשער חי ואין שער שמור. הזינו שער ידני:')} <span dir="ltr">1 ${esc(cur.value)} = <input id="x-man" inputmode="decimal" aria-label="${T('שער ידני')}"> ${esc(t.defaultCurrency)}</span>`;
       const man = $('#x-man', box);
       man.oninput = () => { r.rate = L.parseAmount(man.value); r.manual = true; r.keepBox = true; };
       man.onchange = drawRate;
@@ -1276,13 +1294,13 @@ function expenseSheet(st, existing, type = 'expense') {
     }
     const a = L.parseAmount(amt.value);
     const conv = a > 0 ? `<b class="money">≈ ${esc(L.formatMoney(L.convert(a, r.rate), t.defaultCurrency))}</b>` : '';
-    const src = r.manual ? 'שער ידני' : r.source === 'saved' ? 'השער ששמור בתנועה' : r.source === 'cache' ? `שער שמור מ-${new Date(r.at).toLocaleDateString('he-IL')} (אין חיבור)` : 'שער יציג עדכני';
+    const src = r.manual ? T('שער ידני') : r.source === 'saved' ? T('השער ששמור בתנועה') : r.source === 'cache' ? T('שער שמור מ-{d} (אין חיבור)', { d: formatDate(new Date(r.at).toISOString().slice(0, 10)) }) : T('שער יציג עדכני');
     box.innerHTML = `💱 <span class="money">1 ${cur.value} = ${r.rate.toFixed(4)} ${t.defaultCurrency}</span> · ${conv}
-      <br><small>${src} · השער יישמר בתנועה ולא ישתנה בעתיד ·
-      <button type="button" class="linkish" id="x-edit-rate" style="border:0;background:none;color:inherit;text-decoration:underline;padding:0">שינוי ידני</button>
-      ${r.source === 'saved' ? ' · <button type="button" id="x-refresh" style="border:0;background:none;color:inherit;text-decoration:underline;padding:0">רענון לשער של היום</button>' : ''}</small>`;
+      <br><small>${src} · ${T('השער יישמר בתנועה ולא ישתנה בעתיד')} ·
+      <button type="button" class="linkish" id="x-edit-rate" style="border:0;background:none;color:inherit;text-decoration:underline;padding:0">${T('שינוי ידני')}</button>
+      ${r.source === 'saved' ? ` · <button type="button" id="x-refresh" style="border:0;background:none;color:inherit;text-decoration:underline;padding:0">${T('רענון לשער של היום')}</button>` : ''}</small>`;
     $('#x-edit-rate', box).onclick = () => {
-      box.innerHTML = `💱 1 ${cur.value} = <input id="x-man" inputmode="decimal" value="${r.rate}" aria-label="שער ידני"> ${t.defaultCurrency}`;
+      box.innerHTML = `💱 1 ${cur.value} = <input id="x-man" inputmode="decimal" value="${r.rate}" aria-label="${T('שער ידני')}"> ${t.defaultCurrency}`;
       const man = $('#x-man', box); man.focus(); man.select();
       man.oninput = () => { const v = L.parseAmount(man.value); if (v > 0) { r.rate = v; r.manual = true; } };
       man.onchange = drawRate; man.onblur = drawRate;
@@ -1313,9 +1331,9 @@ function expenseSheet(st, existing, type = 'expense') {
   let chosen = e.category || '';
   const drawCats = () => {
     const all = [...new Set([...categories, ...extra, ...(chosen ? [chosen] : [])])];
-    cat.innerHTML = `<option value="" disabled hidden>בחרו קטגוריה</option>
-      <option value="${NEW_CAT}">➕ להוסיף קטגוריה חדשה</option>`
-      + all.map(c => `<option value="${esc(c)}">${L.categoryEmoji(c)} ${esc(c)}</option>`).join('');
+    cat.innerHTML = `<option value="" disabled hidden>${T('בחרו קטגוריה')}</option>
+      <option value="${NEW_CAT}">➕ ${T('להוסיף קטגוריה חדשה')}</option>`
+      + all.map(c => `<option value="${esc(c)}">${L.categoryEmoji(c)} ${esc(T(c))}</option>`).join('');
     cat.value = newBox.classList.contains('hidden') ? chosen : NEW_CAT;
   };
   const closeNew = () => { newBox.classList.add('hidden'); newIn.value = ''; drawCats(); };
@@ -1356,13 +1374,13 @@ function expenseSheet(st, existing, type = 'expense') {
   const endGeo = state => { stopGeo(); stopGeo = () => {}; geo = state; drawGeo(); };
   const linkBtn = (id, text) => `<button type="button" class="linkish" id="${id}">${text}</button>`;
   function drawGeo() {
-    const acc = loc ? L.formatAccuracy(loc.acc) : '';
+    const acc = loc ? L.formatAccuracy(loc.acc, [T('מ׳'), T('ק״מ')]) : '';
     let html;
-    if (geo === 'wait') html = `<span class="pulse" aria-hidden="true"></span> 📍 מאתר מיקום… ${linkBtn('g-skip', 'בלי מיקום')}`;
-    else if (geo === 'fix') html = `<span class="pulse" aria-hidden="true"></span> 📍 מיקום נקלט <bdi class="num">${acc}</bdi> · מתעדכן עד השמירה ${linkBtn('g-skip', 'בלי מיקום')}`;
-    else if (geo === 'denied') html = `📍 אין הרשאה למיקום. אפשר לאשר בהגדרות הדפדפן ${linkBtn('g-start', 'נסו שוב')}`;
-    else if (loc) html = `📍 <a href="${esc(L.mapsUrl(loc))}" target="_blank" rel="noopener">${esc(!locChanged && existing?.address || 'מיקום במפה')}</a> <bdi class="num">${acc}</bdi> ${linkBtn('g-start', 'עדכון')} · ${linkBtn('g-del', 'הסרה')}`;
-    else html = `📍 ללא מיקום ${linkBtn('g-start', 'הוספת מיקום')}`;
+    if (geo === 'wait') html = `<span class="pulse" aria-hidden="true"></span> 📍 ${T('מאתר מיקום…')} ${linkBtn('g-skip', T('בלי מיקום'))}`;
+    else if (geo === 'fix') html = `<span class="pulse" aria-hidden="true"></span> 📍 ${T('מיקום נקלט')} <bdi class="num">${acc}</bdi> · ${T('מתעדכן עד השמירה')} ${linkBtn('g-skip', T('בלי מיקום'))}`;
+    else if (geo === 'denied') html = `📍 ${T('אין הרשאה למיקום. אפשר לאשר בהגדרות הדפדפן')} ${linkBtn('g-start', T('נסו שוב'))}`;
+    else if (loc) html = `📍 <a href="${esc(L.mapsUrl(loc))}" target="_blank" rel="noopener">${esc(!locChanged && existing?.address || T('מיקום במפה'))}</a> <bdi class="num">${acc}</bdi> ${linkBtn('g-start', T('עדכון'))} · ${linkBtn('g-del', T('הסרה'))}`;
+    else html = `📍 ${T('ללא מיקום')} ${linkBtn('g-start', T('הוספת מיקום'))}`;
     geoBox.innerHTML = html;
     geoBox.classList.toggle('live', geo === 'wait' || geo === 'fix');
     const on = (id, fn) => { const b = $('#' + id, geoBox); if (b) b.onclick = fn; };
@@ -1378,10 +1396,10 @@ function expenseSheet(st, existing, type = 'expense') {
   let shrinking = 0;
   const picsBox = $('#x-photos', el);
   function drawPics() {
-    picsBox.innerHTML = pics.map((p, i) => `<div class="thumb"><button type="button" class="open" data-open="${i}" aria-label="הצגת תמונה ${i + 1}"><img src="${L.isPhotoData(p.data) ? p.data : ''}" alt=""></button>
-        <button type="button" class="x" data-rm="${i}" aria-label="הסרת תמונה ${i + 1}">✕</button></div>`).join('')
+    picsBox.innerHTML = pics.map((p, i) => `<div class="thumb"><button type="button" class="open" data-open="${i}" aria-label="${T('הצגת תמונה {n}', { n: i + 1 })}"><img src="${L.isPhotoData(p.data) ? p.data : ''}" alt=""></button>
+        <button type="button" class="x" data-rm="${i}" aria-label="${T('הסרת תמונה {n}', { n: i + 1 })}">✕</button></div>`).join('')
       + (shrinking ? `<div class="thumb busy">⏳</div>` : '')
-      + (pics.length + shrinking < L.MAX_PHOTOS ? `<button type="button" class="btn ghost sm" data-cam>📷 צילום</button><button type="button" class="btn ghost sm" data-gal>🖼️ גלריה</button>` : '');
+      + (pics.length + shrinking < L.MAX_PHOTOS ? `<button type="button" class="btn ghost sm" data-cam>📷 ${T('צילום')}</button><button type="button" class="btn ghost sm" data-gal>🖼️ ${T('גלריה')}</button>` : '');
     $$('[data-open]', picsBox).forEach(b => b.onclick = () => photoViewer(pics.map(p => p.data), +b.dataset.open));
     $$('[data-rm]', picsBox).forEach(b => b.onclick = () => { const [p] = pics.splice(+b.dataset.rm, 1); if (p.id) removed.push(p.id); drawPics(); });
     const cam = $('[data-cam]', picsBox), gal = $('[data-gal]', picsBox);
@@ -1392,10 +1410,10 @@ function expenseSheet(st, existing, type = 'expense') {
     const all = [...input.files];
     const files = all.slice(0, L.MAX_PHOTOS - pics.length - shrinking);
     input.value = '';
-    if (all.length > files.length) toast(`אפשר עד ${L.MAX_PHOTOS} תמונות`);
+    if (all.length > files.length) toast(T('אפשר עד {n} תמונות', { n: L.MAX_PHOTOS }));
     for (const f of files) {
       shrinking++; drawPics();
-      try { pics.push({ data: await shrinkImage(f) }); } catch { toast('לא הצלחתי לקרוא את התמונה', 'bad'); }
+      try { pics.push({ data: await shrinkImage(f) }); } catch { toast(T('לא הצלחתי לקרוא את התמונה'), 'bad'); }
       shrinking--; drawPics();
     }
   };
@@ -1432,7 +1450,7 @@ function expenseSheet(st, existing, type = 'expense') {
       catch (err) {
         console.error(err);
         stBox.classList.add('done');
-        stBox.textContent = navigator.onLine ? '⚠️ לא הצלחתי לקרוא את הקבלה. אפשר למלא ידנית.' : '⚠️ בפעם הראשונה צריך חיבור כדי להוריד את קבצי הזיהוי. אפשר למלא ידנית.';
+        stBox.textContent = '⚠️ ' + (navigator.onLine ? T('לא הצלחתי לקרוא את הקבלה. אפשר למלא ידנית.') : T('בפעם הראשונה צריך חיבור כדי להוריד את קבצי הזיהוי. אפשר למלא ידנית.'));
         scanBtn.disabled = false; return;
       }
       scanBtn.disabled = false;
@@ -1440,14 +1458,14 @@ function expenseSheet(st, existing, type = 'expense') {
       const got = L.parseReceipt(text, { currency: cur.value, categories });
       const filled = [];
       const amtFree = amt.value === before.amt, curFree = cur.value === before.cur;
-      if (got.amount > 0 && amtFree) { amt.value = got.amount.toFixed(2); mark(amt); filled.push('סכום'); }
-      if (got.amount > 0 && amtFree && curFree && got.currency !== cur.value && L.CURRENCIES.some(c => c.code === got.currency)) { cur.value = got.currency; mark(cur); loadRate(); filled.push('מטבע'); }
+      if (got.amount > 0 && amtFree) { amt.value = got.amount.toFixed(2); mark(amt); filled.push(T('סכום')); }
+      if (got.amount > 0 && amtFree && curFree && got.currency !== cur.value && L.CURRENCIES.some(c => c.code === got.currency)) { cur.value = got.currency; mark(cur); loadRate(); filled.push(T('מטבע')); }
       else drawRate();
-      if (got.date && $('#x-date', el).value === before.date) { $('#x-date', el).value = got.date; mark($('#x-date', el)); filled.push('תאריך'); }
-      if (got.details && !$('#x-det', el).value.trim()) { $('#x-det', el).value = got.details; mark($('#x-det', el)); filled.push('פירוט'); }
-      if (got.category && !chosen) { chosen = got.category; drawCats(); mark(cat); filled.push('קטגוריה'); }
+      if (got.date && $('#x-date', el).value === before.date) { $('#x-date', el).value = got.date; mark($('#x-date', el)); filled.push(T('תאריך')); }
+      if (got.details && !$('#x-det', el).value.trim()) { $('#x-det', el).value = got.details; mark($('#x-det', el)); filled.push(T('פירוט')); }
+      if (got.category && !chosen) { chosen = got.category; drawCats(); mark(cat); filled.push(T('קטגוריה')); }
       stBox.classList.remove('hidden'); stBox.classList.add('done');
-      stBox.textContent = filled.length ? `🟨 מולא מהקבלה: ${filled.join(', ')} – בדקו את השדות המסומנים ושמרו` : '⚠️ לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.';
+      stBox.textContent = filled.length ? '🟨 ' + T('מולא מהקבלה: {x} – בדקו את השדות המסומנים ושמרו', { x: filled.join(', ') }) : '⚠️ ' + T('לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.');
     };
     $('#x-scan-cam', el).onchange = onScan;
     $('#x-scan-gal', el).onchange = onScan;
@@ -1459,8 +1477,8 @@ function expenseSheet(st, existing, type = 'expense') {
   if (del) del.onclick = () => { m.close(); st.del(existing); };
   $('form', el).onsubmit = async ev => {
     ev.preventDefault();
-    if (r.loading) return toast('רגע, טוען שער…');
-    if (shrinking) return toast('רגע, מעבד תמונה…');
+    if (r.loading) return toast(T('רגע, טוען שער…'));
+    if (shrinking) return toast(T('רגע, מעבד תמונה…'));
     const amount = L.parseAmount(amt.value);
     const rate = cur.value === t.defaultCurrency ? 1 : r.rate;
     const amt2 = amount > 0 ? L.round2(amount) : amount;
@@ -1474,8 +1492,8 @@ function expenseSheet(st, existing, type = 'expense') {
     };
     if (locChanged || !loc) x.address = ''; // filled in from the new point by fillAddresses
     const errors = L.validateExpense(x);
-    $$('[data-f]', el).forEach(f => { const er = errors[f.dataset.f]; f.classList.toggle('invalid', !!er); $('.err', f).textContent = er || ''; });
-    if (errors.rate) { toast('חסר שער המרה. הזינו שער ידני', 'bad'); return; }
+    $$('[data-f]', el).forEach(f => { const er = errors[f.dataset.f]; f.classList.toggle('invalid', !!er); $('.err', f).textContent = er ? T(er) : ''; });
+    if (errors.rate) { toast(T('חסר שער המרה. הזינו שער ידני'), 'bad'); return; }
     const bad = $('.invalid input, .invalid select', el);
     if (bad) { bad.focus(); return; }
     if (!categories.includes(x.category) && x.category !== L.UNCATEGORIZED) fire(store.addCategory(x.category));
@@ -1483,7 +1501,7 @@ function expenseSheet(st, existing, type = 'expense') {
     const addPhotos = pics.filter(p => !p.id).map(p => ({ id: store.newPhotoId(t.id), data: p.data }));
     x.photoIds = L.nextPhotoIds(existing?.photoIds, removed, addPhotos.map(p => p.id));
     fire(store.saveExpense(t.id, eid, x, !existing, { addPhotos, removePhotos: removed }));
-    m.close(); toast(existing ? 'עודכן' : 'נשמר ✓', 'good');
+    m.close(); toast(existing ? T('עודכן') : T('נשמר') + ' ✓', 'good');
   };
   if (!existing) setTimeout(() => amt.focus(), 80);
 }
@@ -1493,10 +1511,10 @@ function expenseSheet(st, existing, type = 'expense') {
 function photoViewer(list, start) {
   let i = start;
   const m = modal(`<div class="viewer"><img alt=""><div class="vbar">
-      <button type="button" class="btn ghost sm" data-p aria-label="הקודמת">→</button>
+      <button type="button" class="btn ghost sm" data-p aria-label="${T('הקודמת')}">${backArrow()}</button>
       <span class="num" aria-live="polite"></span>
-      <button type="button" class="btn ghost sm" data-n aria-label="הבאה">←</button>
-      <button type="button" class="btn primary sm" data-x>סגירה</button></div></div>`, { label: 'תמונות' });
+      <button type="button" class="btn ghost sm" data-n aria-label="${T('הבאה')}">${fwdArrow()}</button>
+      <button type="button" class="btn primary sm" data-x>${T('סגירה')}</button></div></div>`, { label: T('תמונות') });
   m.el.classList.add('photo-dialog');
   const draw = () => {
     $('img', m.el).src = list[i];
@@ -1510,6 +1528,7 @@ function photoViewer(list, start) {
 }
 
 function adminPage() {
+  holdHebrew(true); // owner: the admin panel stays Hebrew (dialogs too); route() lets go again
   view.innerHTML = `
     <header class="topbar"><a class="icon-btn" href="#/" title="חזרה" aria-label="חזרה">→</a><h1>⚙️ ניהול</h1>
       <button class="icon-btn" id="logout" title="יציאה מהניהול" aria-label="יציאה מהניהול">🚪</button></header>
@@ -1620,29 +1639,29 @@ function printReport(st) {
   const n = v => `<td class="n">${esc(v)}</td>`;
   $('#print').innerHTML = `
     <h1>${esc(t.name)}</h1>
-    <div>📍 ${esc(t.location)} · ${esc(dateRange(t.startDate, t.endDate))} · מטבע: ${esc(t.defaultCurrency)}</div>
-    <div>משתתפים: ${t.participants.map(esc).join(', ')}</div>
-    ${groups.length ? `<div>קבוצות: ${groups.map(g => `${esc(g.name)} (${g.members.map(esc).join(', ')})`).join(' · ')}</div>` : ''}
-    <h2>סיכום</h2>
+    <div>📍 ${esc(t.location)} · ${esc(dateRange(t.startDate, t.endDate))} · ${T('מטבע:')} ${esc(t.defaultCurrency)}</div>
+    <div>${T('משתתפים:')} ${t.participants.map(esc).join(', ')}</div>
+    ${groups.length ? `<div>${T('קבוצות:')} ${groups.map(g => `${esc(g.name)} (${g.members.map(esc).join(', ')})`).join(' · ')}</div>` : ''}
+    <h2>${T('סיכום')}</h2>
     <div class="kpis">
-      <div>סה"כ הוצאות<b class="n">${esc(f(s.totalExpenses))}</b></div><div>הכנסות / החזרים<b class="n">${esc(f(s.totalIncome))}</b></div>
-      <div>מאזן נטו<b class="n">${esc(f(s.net))}</b></div><div>ממוצע ליום (${s.days})<b class="n">${esc(f(s.perDay))}</b></div>
-      <div>ממוצע לאדם<b class="n">${esc(f(s.perPerson))}</b></div>
-      ${(b => b ? `<div>תקציב (${Math.round(b.pct * 100)}% נוצל)<b class="n">${esc(f(b.total))}</b></div><div>${b.left < 0 ? 'מעל התקציב' : 'נשאר בתקציב'}<b class="n">${esc(f(Math.abs(b.left)))}</b></div>` : '')(L.budgetSummary(t, st.expenses, todayIso()))}</div>
-    <h2>לפי קטגוריות</h2>
-    <table><thead><tr><th>קטגוריה</th><th>תנועות</th><th>סכום</th><th>%</th></tr></thead><tbody>
-      ${cats.map(c => `<tr><td>${esc(c.name)}</td>${n(c.count)}${n(f(c.value))}${n(s.totalExpenses ? Math.round(c.value / s.totalExpenses * 100) + '%' : '')}</tr>`).join('')}</tbody></table>
-    <h2>התחשבנות</h2>
-    <table><thead><tr><th>משתתף</th><th>שילם</th><th>קיבל החזר</th><th>חלקו</th><th>יתרה</th></tr></thead><tbody>
+      <div>${T('סה"כ הוצאות')}<b class="n">${esc(f(s.totalExpenses))}</b></div><div>${T('הכנסות / החזרים')}<b class="n">${esc(f(s.totalIncome))}</b></div>
+      <div>${T('מאזן נטו')}<b class="n">${esc(f(s.net))}</b></div><div>${T('ממוצע ליום')} (${s.days})<b class="n">${esc(f(s.perDay))}</b></div>
+      <div>${T('ממוצע לאדם')}<b class="n">${esc(f(s.perPerson))}</b></div>
+      ${(b => b ? `<div>${T('תקציב ({p}% נוצל)', { p: Math.round(b.pct * 100) })}<b class="n">${esc(f(b.total))}</b></div><div>${b.left < 0 ? T('מעל התקציב') : T('נשאר בתקציב')}<b class="n">${esc(f(Math.abs(b.left)))}</b></div>` : '')(L.budgetSummary(t, st.expenses, todayIso()))}</div>
+    <h2>${T('לפי קטגוריות')}</h2>
+    <table><thead><tr><th>${T('קטגוריה')}</th><th>${T('תנועות')}</th><th>${T('סכום')}</th><th>%</th></tr></thead><tbody>
+      ${cats.map(c => `<tr><td>${esc(T(c.name))}</td>${n(c.count)}${n(f(c.value))}${n(s.totalExpenses ? Math.round(c.value / s.totalExpenses * 100) + '%' : '')}</tr>`).join('')}</tbody></table>
+    <h2>${T('התחשבנות')}</h2>
+    <table><thead><tr><th>${T('משתתף')}</th><th>${T('שילם')}</th><th>${T('קיבל החזר')}</th><th>${T('חלקו')}</th><th>${T('יתרה')}</th></tr></thead><tbody>
       ${bal.map(b => `<tr><td>${esc(b.name)}</td>${n(f(b.paid))}${n(f(b.received))}${n(f(b.share))}${n(f(b.balance))}</tr>`).join('')}</tbody></table>
-    ${tr.length ? `<p>${tr.map(x => `${esc(x.from)} מעביר/ה ל${esc(x.to)} <bdi>${esc(f(x.amount))}</bdi>`).join(' · ')}</p>` : '<p>כולם מאוזנים.</p>'}
-    <h2>כל התנועות (${rows.length})</h2>
-    <table><thead><tr><th>תאריך</th><th>סוג</th><th>קטגוריה</th><th>פירוט</th><th>הערה</th><th>שילם</th><th>סכום</th><th>במטבע הטיול</th></tr></thead><tbody>
-      ${rows.map(e => `<tr><td class="n">${esc(formatDate(e.date))}</td><td>${e.type === 'income' ? 'הכנסה' : 'הוצאה'}</td><td>${esc(e.category)}</td>
+    ${tr.length ? `<p>${tr.map(x => `${esc(x.from)} ${fwdArrow()} ${esc(x.to)} <bdi>${esc(f(x.amount))}</bdi>`).join(' · ')}</p>` : `<p>${T('כולם מאוזנים.')}</p>`}
+    <h2>${T('כל התנועות ({n})', { n: rows.length })}</h2>
+    <table><thead><tr><th>${T('תאריך')}</th><th>${T('סוג')}</th><th>${T('קטגוריה')}</th><th>${T('פירוט')}</th><th>${T('הערה')}</th><th>${T('שילם')}</th><th>${T('סכום')}</th><th>${T('במטבע הטיול')}</th></tr></thead><tbody>
+      ${rows.map(e => `<tr><td class="n">${esc(formatDate(e.date))}</td><td>${e.type === 'income' ? T('הכנסה') : T('הוצאה')}</td><td>${esc(T(e.category))}</td>
         <td>${esc(e.details)}${e.address ? `<br><small>📍 ${esc(e.address)}</small>` : ''}</td><td>${esc(e.comment || '')}</td><td>${esc(e.paidBy)}</td>${n(L.formatMoney(e.amount, e.currency))}${n(f(e.convertedAmount))}</tr>`).join('')}</tbody></table>
-    <p style="margin-top:6mm;color:#666;font-size:9pt">הופק בטיולון · ${esc(new Date().toLocaleString('he-IL'))}</p>`;
+    <p style="margin-top:6mm;color:#666;font-size:9pt">${T('הופק בטיולון')} · ${esc(formatDate(todayIso(), { year: 'numeric' }))} ${esc(new Date().toTimeString().slice(0, 5))}</p>`;
   const title = document.title;
-  document.title = `טיולון - ${t.name}`; // becomes the PDF file name
+  document.title = `${T('טיולון')} - ${t.name}`; // becomes the PDF file name
   window.print();
   setTimeout(() => document.title = title, 500);
 }

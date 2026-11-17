@@ -237,9 +237,10 @@ input.code { font-size: 28px; letter-spacing: 14px; text-align: center; directio
 .tx .clamp.cut:focus-visible { outline: 2px solid var(--sky-d); outline-offset: 2px; border-radius: 6px; }
 .tx .clamp.open { display: block; -webkit-line-clamp: unset; line-clamp: none; }
 .tx .acts { display: flex; gap: 6px; margin-top: 6px; }
-.tx .amt { text-align: left; font-weight: 800; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
+.tx .amt { text-align: end; font-weight: 800; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; }
 .tx .amt small { font-weight: 400; color: var(--ink3); font-size: 17px; }
 .fab { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: max(20px, calc(50% - var(--maxw) / 2 + 24px)); height: 60px; padding: 0 24px 0 26px; border-radius: var(--pill); border: 0; background: var(--sky-btn); color: #04263B; font-size: var(--fs); font-weight: 800; box-shadow: var(--shadow-fab); z-index: 30; display: inline-flex; align-items: center; gap: 8px; transition: transform .12s; }
+:root[dir=ltr] .fab { left: auto; right: max(20px, calc(50% - var(--maxw) / 2 + 24px)); }
 .fab span { font-size: 30px; line-height: 1; font-weight: 700; }
 /* "מה זה?" help */
 .topbar .brand { flex: 1; min-width: 0; }
@@ -405,7 +406,7 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 .b-kv .card { padding: var(--s3); } .b-kv b { display: block; font-size: 22px; } .b-kv small { font-size: 16px; font-weight: 500; }
 .b-tip { background: var(--sky-soft); border: 1px solid var(--sky-chip); color: var(--sky-d); border-radius: var(--r-sm); padding: var(--s3) var(--s4); font-size: 19px; }
 .b-tip.warn { background: #FFFBEB; border-color: #FDE68A; color: #92400E; } .b-tip.good { background: var(--mint-soft); border-color: var(--mint); color: var(--mint-d); }
-.b-daily { display: flex; justify-content: space-between; align-items: center; } .b-daily b { display: block; font-size: 26px; } .b-end { text-align: left; }
+.b-daily { display: flex; justify-content: space-between; align-items: center; } .b-daily b { display: block; font-size: 26px; } .b-end { text-align: end; }
 .b-days { display: grid; gap: 4px; }
 .drow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 92px; gap: var(--s2); align-items: center; border: 0; background: none; padding: 6px 4px; border-radius: 12px; text-align: start; font-size: 18px; color: var(--ink); }
 .drow:not(:disabled):hover { background: var(--bg); } .drow.today { background: var(--sky-soft); } .drow.fut { color: var(--ink3); cursor: default; }
@@ -413,7 +414,7 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 .drow .bar i { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: var(--pill); background: var(--mint-d); }
 .drow .bar i.o { background: var(--peach-d); } .drow .bar i.f { background: repeating-linear-gradient(-45deg, #CBD5E1 0 4px, #E2E8F0 4px 8px); }
 .drow .bar .line { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
-.drow .amt { text-align: left; font-weight: 700; line-height: 1.2; } .drow .amt small { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); }
+.drow .amt { text-align: end; font-weight: 700; line-height: 1.2; } .drow .amt small { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); }
 .drow .amt small.neg { color: var(--peach-d); } .drow .amt small.pos { color: var(--mint-d); }
 .drow.out { border-top: 1px dashed var(--line); border-radius: 0; color: var(--ink2); }
 /* undo toast: message, ↩ ביטול and a bar that shrinks while undo is possible */
@@ -525,3 +526,24 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
   background: var(--card); border: 1.5px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow-pop); }
 .scan-menu button { border: 0; background: none; color: var(--ink); text-align: start; min-height: 48px; padding: 8px 14px; border-radius: 12px; font-weight: 600; }
 .scan-menu button:hover, .scan-menu button:focus-visible { background: var(--sky-soft); }
+
+/* ---------- Step 25: languages ---------- */
+:root[dir=ltr] select { background-position: right 16px top 21px, right 22px top 21px; padding-left: 16px; padding-right: 40px; }
+.lang-wrap { position: relative; flex: none; }
+.lang-pill { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px; border-radius: var(--pill); border: 1.5px solid var(--line);
+  background: var(--card); color: var(--sky-d); font-weight: 800; font-size: var(--fs-sm); white-space: nowrap; box-shadow: var(--shadow); }
+.lang-wrap .menu { top: 50px; inset-inline-end: auto; inset-inline-start: 0; min-width: 190px; }
+.lang-wrap .menu button { display: flex; align-items: center; gap: 10px; }
+.lang-wrap .menu button code { font: 800 14px Heebo, system-ui, sans-serif; color: var(--ink2); min-width: 24px; }
+.lang-wrap .menu button[aria-checked=true] { background: var(--sky-soft); font-weight: 700; }
+.lang-wrap .menu button .ck { margin-inline-start: auto; }
+/* home top bar: name + ⚙️ on the first row, 🌐 language and ❓ help under the name (fits every language at phone width) */
+.topbar.home-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand admin" "pills pills"; row-gap: var(--s2); align-items: center; }
+.home-top .brand { grid-area: brand; } .home-top #adminBtn { grid-area: admin; }
+.home-top .top-pills { grid-area: pills; display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+/* direction fixes (rtl-check 1.21): user text takes its own direction; LTR mirror of the undo bar */
+.tx .t, .tx .com, .tripbar h1, .tb-t b, .trip-card h3, .help-tip span { unicode-bidi: plaintext; }
+.xfer b, .person b, .pn, #who button, .chip.in span, .members { unicode-bidi: isolate; }
+:root[dir=ltr] .toast .bar { transform-origin: left; }
+.tag button { margin: 0; margin-block: -6px; margin-inline: -4px -8px; }
+.fab { padding-block: 0; padding-inline: 26px 24px; }

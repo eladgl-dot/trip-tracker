@@ -560,3 +560,38 @@ test('review 1.19: receipt totals that mention VAT, and paid amounts on the same
   assert.equal(L.parseReceipt('Currency exchange office\nTotal 30.00').amount, 30);
   assert.equal(L.parseReceipt('Eurospin\nTotale 9.99', { currency: 'ILS' }).currency, 'ILS'); // "Euro" inside a shop name is not €
 });
+
+// ---- Step 25: languages
+import { appKeys } from './i18n-keys.mjs';
+import { EN, RU } from '../app/js/i18n-dict.js';
+import { pickLang, tIn } from '../app/js/i18n.js';
+test('languages: every Hebrew text has English and Russian, with the same {placeholders}', () => {
+  const vars = s => (s.match(/\{\w+\}/g) || []).sort().join();
+  const tags = s => (s.match(/<[^>]+>/g) || []).length;
+  for (const k of appKeys()) for (const [name, d] of [['EN', EN], ['RU', RU]]) {
+    assert.ok(typeof d[k] === 'string' && d[k].trim(), `${name} missing: ${k}`);
+    assert.equal(vars(d[k]), vars(k), `${name} placeholders differ: ${k}`);
+    assert.equal(tags(d[k]), tags(k), `${name} html tags differ: ${k}`);
+    assert.ok(!/[֐-׿]/.test(d[k]), `${name} still Hebrew: ${k}`);
+  }
+});
+test('languages: first choice = phone language if he/en/ru, otherwise Hebrew; a saved choice wins', () => {
+  assert.equal(pickLang(null, ['ru-RU', 'en']), 'ru');
+  assert.equal(pickLang(null, ['en-US']), 'en');
+  assert.equal(pickLang(null, ['iw']), 'he');
+  assert.equal(pickLang(null, ['fr-FR', 'de']), 'he');
+  assert.equal(pickLang(null, []), 'he');
+  assert.equal(pickLang('en', ['ru']), 'en');
+  assert.equal(pickLang('xx', ['ru']), 'ru');
+});
+test('languages: t() fills placeholders, unknown text falls back to Hebrew', () => {
+  assert.equal(tIn('en', '{n} ימים', { n: 3 }), '3 days');
+  assert.equal(tIn('ru', '{n} ימים', { n: 3 }), '3 дн.');
+  assert.equal(tIn('he', '{n} ימים', { n: 3 }), '3 ימים');
+  assert.equal(tIn('en', 'משהו שלא קיים'), 'משהו שלא קיים');
+  assert.equal(tIn('en', 'מסעדות ובתי קפה'), 'Restaurants & cafés'); // built-in category names are translated
+});
+import { unwrappedHebrew } from './i18n-keys.mjs';
+test('languages: no Hebrew text in the screens that skips translation', () => {
+  assert.deepEqual(unwrappedHebrew(), []);
+});

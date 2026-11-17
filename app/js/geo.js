@@ -1,5 +1,6 @@
 // GPS while the expense form is open, and street address from OpenStreetMap (Nominatim).
 import { formatAddress } from './logic.js';
+import { lang } from './i18n.js';
 
 // Calls onUpdate({ state: 'wait'|'fix'|'denied'|'off', loc }) every time the phone reports a new fix.
 // Returns stop(). The last fix is the one that gets saved.
@@ -16,7 +17,7 @@ export function watchLocation(onUpdate) {
 const round6 = n => Math.round(n * 1e6) / 1e6;
 
 export async function reverseGeocode(loc) {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=he,en&lat=${loc.lat}&lon=${loc.lng}`;
+  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=${lang},en&lat=${loc.lat}&lon=${loc.lng}`;
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 8000);
   try {
     const res = await fetch(url, { signal: ctl.signal });

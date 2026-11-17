@@ -279,7 +279,7 @@ export function filterTrips(trips, { mine = new Set(), scope = 'mine', tag = '',
 }
 export const sortTrips = trips => [...trips].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '') || (b.createdAtMs || 0) - (a.createdAtMs || 0));
 // mode 'year' | 'tag' | 'none' → [{ key, label, tag?, trips }]. By tag with a tag filter on: every trip goes under the filtered tag.
-export function groupTrips(trips, mode, filterTag = '') {
+export function groupTrips(trips, mode, filterTag = '', lang = 'he') {
   const sorted = sortTrips(trips);
   if (!sorted.length) return [];
   if (mode === 'none') return [{ key: 'all', label: '', trips: sorted }];
@@ -291,8 +291,8 @@ export function groupTrips(trips, mode, filterTag = '') {
       cm.get(k).push(t);
     }
     const rank = k => k === '' ? 2 : k === '*' ? 1 : 0;
-    return [...cm.keys()].sort((a, b) => rank(a) - rank(b) || countryName(a).localeCompare(countryName(b), 'he'))
-      .map(k => ({ key: 'country:' + k, label: k === '*' ? MANY_COUNTRIES : k ? countryName(k) || k : NO_COUNTRY, ...(k && k !== '*' ? { country: k } : {}), trips: cm.get(k) }));
+    return [...cm.keys()].sort((a, b) => rank(a) - rank(b) || countryName(a, lang).localeCompare(countryName(b, lang), lang))
+      .map(k => ({ key: 'country:' + k, label: k === '*' ? MANY_COUNTRIES : k ? countryName(k, lang) || k : NO_COUNTRY, ...(k && k !== '*' ? { country: k } : {}), trips: cm.get(k) }));
   }
   const map = new Map();
   for (const t of sorted) {
@@ -380,9 +380,9 @@ export const isPhotoData = d => typeof d === 'string' && /^data:image\/jpeg;base
 // Does not depend on the saved photos having been loaded (offline, slow network).
 export const nextPhotoIds = (saved = [], removed = [], added = []) => [...saved.filter(id => !removed.includes(id)), ...added];
 
-export function formatAccuracy(m) {
+export function formatAccuracy(m, units = ['מ׳', 'ק״מ']) {
   if (!(m >= 0)) return '';
-  return m < 1000 ? `±${Math.round(m)} מ׳` : `±${(m / 1000).toFixed(1)} ק״מ`;
+  return m < 1000 ? `±${Math.round(m)} ${units[0]}` : `±${(m / 1000).toFixed(1)} ${units[1]}`;
 }
 
 // Short address from an OpenStreetMap Nominatim reverse reply: place name, street, town, country.
@@ -399,8 +399,8 @@ export function formatAddress(j) {
 export const mapsUrl = loc => `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`;
 
 // WhatsApp share: the link sits on its own line so it stays clickable inside Hebrew text.
-export const shareMessage = (tripName, link, pin = '') =>
-  `🧳 הוצאות הטיול "${tripName}"\n${link}` + (pin ? `\n🔑 סיסמה: ${pin}` : '');
+export const shareMessage = (tripName, link, pin = '', words = ['הוצאות הטיול', 'סיסמה']) =>
+  `🧳 ${words[0]} "${tripName}"\n${link}` + (pin ? `\n🔑 ${words[1]}: ${pin}` : '');
 export const shareUrl = text => 'https://wa.me/?text=' + encodeURIComponent(text);
 
 // ---- Undo after delete, and the trip trash (deleted trips are kept 30 days, restorable by the manager)
