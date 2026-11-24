@@ -7,7 +7,7 @@ import {
   query, where, writeBatch, serverTimestamp, arrayUnion
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from '../config.js';
-import { DEFAULT_CATEGORIES } from './logic.js';
+import { DEFAULT_CATEGORIES, splitParts } from './logic.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -19,6 +19,11 @@ const tripsCol = () => collection(db, 'trips');
 const expCol = tripId => collection(db, 'trips', tripId, 'expenses');
 const catDoc = () => doc(db, 'settings', 'categories');
 const photoCol = tripId => collection(db, 'trips', tripId, 'photos');
+// Attached files (Step 27): trips/{id}/files/{fid} = name, type, size, expenseId, parts; the file itself is split
+// into base64 pieces trips/{id}/files/{fid}/parts/p0..pN (a Firestore record holds at most 1 MB).
+const fileCol = tripId => collection(db, 'trips', tripId, 'files');
+const partRef = (tripId, fid, i) => doc(db, 'trips', tripId, 'files', fid, 'parts', 'p' + i);
+const dropFile = (batch, tripId, f) => { for (let i = 0; i < (f.parts || 0); i++) batch.delete(partRef(tripId, f.id, i)); batch.delete(doc(db, 'trips', tripId, 'files', f.id)); };
 
 export const kind = 'firebase';
 
@@ -44,10 +49,12 @@ export async function createTripWithId(id, data) {
 export const updateTrip = (id, patch) => updateDoc(doc(db, 'trips', id), patch);
 
 export async function deleteTrip(id) {
-  const [exps, photos] = await Promise.all([getDocs(expCol(id)), getDocs(photoCol(id))]);
+  const [exps, photos, files] = await Promise.all([getDocs(expCol(id)), getDocs(photoCol(id)), getDocs(fileCol(id))]);
+  const refs = [...exps.docs.map(d => d.ref), ...photos.docs.map(d => d.ref)];
+  for (const f of files.docs) { for (let i = 0; i < (f.data().parts || 0); i++) refs.push(partRef(id, f.id, i)); refs.push(f.ref); }
   let batch = writeBatch(db), n = 0;
-  for (const d of [...exps.docs, ...photos.docs]) {
-    batch.delete(d.ref);
+  for (const r of refs) {
+    batch.delete(r);
     if (++n % 450 === 0) { await batch.commit(); batch = writeBatch(db); }
   }
   batch.delete(doc(db, 'trips', id));
@@ -60,21 +67,32 @@ export const newExpenseId = tripId => doc(expCol(tripId)).id;
 // isNew: create with this id (from newExpenseId), else update. The caller doesn't block on the
 // promise (offline it resolves only after sync) but still sees errors.
 export const newPhotoId = tripId => doc(photoCol(tripId)).id;
-// One batch: the expense, its new photos and removed photos all succeed or fail together.
-export async function saveExpense(tripId, id, data, isNew = !id, { addPhotos = [], removePhotos = [] } = {}) {
-  const batch = writeBatch(db), now = serverTimestamp();
+export const newFileId = tripId => doc(fileCol(tripId)).id;
+// One batch: the expense, its new photos and removed photos/files all succeed or fail together.
+// Each new file (up to 5 MB → ~7 MB of text) goes first in a batch of its own: a batch may carry at most 10 MB.
+// Nothing is awaited in between, so it also works offline (the writes wait in the phone's queue, in order).
+export async function saveExpense(tripId, id, data, isNew = !id, { addPhotos = [], removePhotos = [], addFiles = [], removeFiles = [] } = {}) {
   const ref = doc(db, 'trips', tripId, 'expenses', id || newExpenseId(tripId));
+  const fileWrites = addFiles.map(f => {
+    const b = writeBatch(db), parts = splitParts(f.data);
+    b.set(doc(db, 'trips', tripId, 'files', f.id), { expenseId: ref.id, name: f.name, type: f.type, size: f.size, parts: parts.length, at: Date.now() });
+    parts.forEach((p, i) => b.set(partRef(tripId, f.id, i), { data: p }));
+    return b.commit();
+  });
+  const batch = writeBatch(db), now = serverTimestamp();
   if (isNew) batch.set(ref, { ...data, createdAt: now, updatedAt: now, createdAtMs: Date.now() });
   else batch.update(ref, { ...data, updatedAt: now });
   for (const p of addPhotos) batch.set(doc(db, 'trips', tripId, 'photos', p.id), { expenseId: ref.id, data: p.data, at: Date.now() });
   for (const pid of removePhotos) batch.delete(doc(db, 'trips', tripId, 'photos', pid));
-  return batch.commit();
+  for (const f of removeFiles) dropFile(batch, tripId, f);
+  return Promise.all([...fileWrites, batch.commit()]);
 }
 export const patchExpense = (tripId, id, patch) => updateDoc(doc(db, 'trips', tripId, 'expenses', id), patch);
 // photoIds come from the expense itself, so this works offline without reading the photos.
-export async function deleteExpense(tripId, id, photoIds = []) {
+export async function deleteExpense(tripId, id, photoIds = [], files = []) {
   const batch = writeBatch(db);
   photoIds.forEach(pid => batch.delete(doc(db, 'trips', tripId, 'photos', pid)));
+  files.forEach(f => dropFile(batch, tripId, f));
   batch.delete(doc(db, 'trips', tripId, 'expenses', id));
   return batch.commit();
 }
@@ -83,6 +101,17 @@ export async function deleteExpense(tripId, id, photoIds = []) {
 export async function getPhotos(tripId, expenseId) {
   const s = await getDocs(query(photoCol(tripId), where('expenseId', '==', expenseId)));
   return s.docs.map(withId).sort((a, b) => a.at - b.at);
+}
+// Every photo of the trip (the 🧷 screen).
+export async function getAllPhotos(tripId) {
+  const s = await getDocs(photoCol(tripId));
+  return s.docs.map(withId);
+}
+// The file's base64 text, put back together from its pieces.
+export async function getFileData(tripId, f) {
+  const parts = await Promise.all(Array.from({ length: f.parts || 0 }, (_, i) => getDoc(partRef(tripId, f.id, i))));
+  if (parts.some(p => !p.exists())) throw new Error('file-missing');
+  return parts.map(p => p.data().data).join('');
 }
 
 

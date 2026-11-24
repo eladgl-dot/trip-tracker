@@ -14,7 +14,7 @@ service cloud.firestore {
         allow read, delete: if request.auth != null;
         allow create, update: if request.auth != null
           && request.resource.data.type in ['expense', 'income']
-          && request.resource.data.amount is number && request.resource.data.amount > 0
+          && request.resource.data.amount is number && request.resource.data.amount >= 0
           && request.resource.data.convertedAmount is number;
       }
 
@@ -26,6 +26,23 @@ service cloud.firestore {
           && request.resource.data.data is string
           && request.resource.data.data.size() < 900000
           && request.resource.data.data.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$');
+      }
+
+      // Attached files (Step 27): up to 5 MB, split into base64 pieces of up to 700,000 characters.
+      match /files/{fileId} {
+        allow read, delete: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.expenseId is string
+          && request.resource.data.name is string && request.resource.data.name.size() <= 200
+          && request.resource.data.type is string && request.resource.data.type.size() <= 100
+          && request.resource.data.size is number && request.resource.data.size >= 0 && request.resource.data.size <= 5242880
+          && request.resource.data.parts is int && request.resource.data.parts >= 1 && request.resource.data.parts <= 12;
+        match /parts/{partId} {
+          allow read, delete: if request.auth != null;
+          allow create: if request.auth != null
+            && request.resource.data.data is string
+            && request.resource.data.data.size() <= 700000;
+        }
       }
     }
 

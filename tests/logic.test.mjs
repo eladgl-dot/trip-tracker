@@ -647,3 +647,81 @@ test('receipt check: tapping a word', () => {
   assert.deepEqual(L.tapWord(p, 'place', 5, false).place, [0, 1, 5], 'next taps add');
   assert.deepEqual(L.tapWord(p, 'place', 0, false).place, [1], 'tap again removes');
 });
+
+// ---------- Step 27: attachments ----------
+test('attachments: kind of a file', () => {
+  assert.equal(L.fileKind('a.jpg', 'image/jpeg'), 'photo');
+  assert.equal(L.fileKind('screen.png', 'image/png'), 'photo');
+  assert.equal(L.fileKind('Booking.PDF', ''), 'doc');
+  assert.equal(L.fileKind('x', 'application/pdf'), 'doc');
+  for (const n of ['a.doc', 'a.docx', 'a.xls', 'a.xlsx', 'a.csv', 'a.txt', 'a.rtf', 'a.odt', 'a.ods']) assert.equal(L.fileKind(n, ''), 'doc', n);
+  assert.equal(L.fileKind('t.zip', 'application/zip'), 'other');
+  assert.equal(L.fileKind('noext', ''), 'other');
+});
+test('attachments: limits when adding', () => {
+  assert.equal(L.MAX_FILES, 5);
+  assert.equal(L.MAX_FILE_BYTES, 5 * 1024 * 1024);
+  assert.equal(L.attachProblem(4, 1000), '');
+  assert.equal(L.attachProblem(5, 1000), 'full');
+  assert.equal(L.attachProblem(0, 5 * 1024 * 1024), '');
+  assert.equal(L.attachProblem(0, 5 * 1024 * 1024 + 1), 'big');
+});
+test('attachments: split into pieces and back', () => {
+  const s = 'A'.repeat(1000) + 'B'.repeat(500);
+  const parts = L.splitParts(s, 600);
+  assert.deepEqual(parts.map(p => p.length), [600, 600, 300]);
+  assert.equal(parts.join(''), s);
+  assert.deepEqual(L.splitParts('', 600), ['']);
+  assert.ok(L.PART_CHARS < 800000);
+  assert.equal(L.splitParts('x'.repeat(L.PART_CHARS * 2 + 1)).length, 3);
+});
+test('attachments: size text', () => {
+  assert.equal(L.fileSizeText(512), '1KB');
+  assert.equal(L.fileSizeText(340 * 1024), '340KB');
+  assert.equal(L.fileSizeText(1.25 * 1024 * 1024), '1.3MB');
+  assert.equal(L.fileSizeText(12.4 * 1024 * 1024), '12.4MB');
+  assert.equal(L.fileSizeText(5 * 1024 * 1024 + 10), '5.1MB', 'just over the limit does not read as 5MB');
+  assert.equal(L.fileSizeText(5 * 1024 * 1024), '5MB');
+});
+test('attachments: amount 0 only with a file', () => {
+  const ok = { currency: 'EUR', exchangeRateToTripDefault: 1, category: 'x', date: '2026-11-01', details: 'd', paidBy: 'a' };
+  assert.ok(L.validateExpense({ ...ok, amount: 0 }).amount, 'no file → amount needed');
+  assert.equal(L.validateExpense({ ...ok, amount: 0 }, { hasFiles: true }).amount, undefined);
+  assert.ok(L.validateExpense({ ...ok, amount: -1 }, { hasFiles: true }).amount, 'negative never');
+  assert.ok(L.validateExpense({ ...ok, amount: NaN }, { hasFiles: true }).amount);
+  assert.equal(L.validateExpense({ ...ok, amount: 5 }).amount, undefined);
+});
+test('attachments: all of a trip, by tab, newest expense first', () => {
+  const ex = [
+    { id: 'a', date: '2026-11-10', details: 'טיסה', photoIds: ['p1'], files: [{ id: 'f1', name: 'LY381.pdf', type: 'application/pdf', size: 1 }] },
+    { id: 'b', date: '2026-11-12', details: 'מלון', photoIds: ['p2', 'p3'], files: [{ id: 'f2', name: 't.zip', type: '', size: 1 }, { id: 'f3', name: 'I.docx', type: '', size: 2 }] },
+    { id: 'c', date: '2026-11-11', details: 'ללא' },
+  ];
+  const all = L.tripAttachments(ex);
+  assert.deepEqual(all.photo.map(g => [g.expense.id, g.items.map(i => i.id)]), [['b', ['p2', 'p3']], ['a', ['p1']]]);
+  assert.deepEqual(all.doc.map(g => [g.expense.id, g.items.map(i => i.id)]), [['b', ['f3']], ['a', ['f1']]]);
+  assert.deepEqual(all.other.map(g => [g.expense.id, g.items.map(i => i.id)]), [['b', ['f2']]]);
+  assert.deepEqual(L.tripAttachments([]), { photo: [], doc: [], other: [] });
+  const img = L.tripAttachments([{ id: 'z', date: '2026-11-01', files: [{ id: 'f9', name: 'x.png', type: 'image/png', size: 1 }] }]);
+  assert.deepEqual(img.other.map(g => g.items.map(i => i.id)), [['f9']], 'an image stored as a file shows under other');
+  assert.equal(L.attachCount(ex[1]), 4);
+  assert.equal(L.attachCount({}), 0);
+});
+test('attachments: only PDF and text open inside the app (never html / svg from the database)', () => {
+  assert.equal(L.openType('a.pdf', 'application/pdf'), 'application/pdf');
+  assert.equal(L.openType('a.pdf', ''), 'application/pdf');
+  assert.equal(L.openType('a.txt', 'text/plain'), 'text/plain');
+  assert.equal(L.openType('a.pdf', 'text/html'), '', 'a .pdf name with an html type');
+  assert.equal(L.openType('x', 'text/html;pdf'), '');
+  assert.equal(L.openType('x.svg', 'image/svg+xml'), '');
+  assert.equal(L.openType('x.html', ''), '');
+  assert.equal(L.openType('x.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'), '');
+});
+test('attachments: file badge', () => {
+  assert.equal(L.fileBadge('a.pdf'), 'PDF');
+  assert.equal(L.fileBadge('Insurance.docx'), 'DOC');
+  assert.equal(L.fileBadge('x', 'application/vnd.ms-excel'), 'XLS');
+  assert.equal(L.fileBadge('n.txt'), 'TXT');
+  assert.equal(L.fileBadge('Tickets.zip'), 'ZIP');
+  assert.equal(L.fileBadge('noext'), 'FILE');
+});

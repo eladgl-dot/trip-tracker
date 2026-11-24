@@ -11,6 +11,7 @@ function load() {
   try { data = JSON.parse(localStorage.getItem(KEY)); } catch { data = null; }
   if (!data) data = { trips: {}, expenses: {}, categories: [...DEFAULT_CATEGORIES] };
   data.photos ||= {};
+  data.files ||= {};
 }
 function save() {
   // Storage full (photos): undo the in-memory change and throw; async callers show an error toast.
@@ -38,28 +39,40 @@ export async function createTripWithId(tid, t) {
   data.trips[tid] = { ...clone(t), createdAtMs: Date.now() }; data.expenses[tid] = {}; save(); return tid;
 }
 export async function updateTrip(tid, patch) { Object.assign(data.trips[tid], clone(patch)); save(); }
-export async function deleteTrip(tid) { delete data.trips[tid]; delete data.expenses[tid]; delete data.photos[tid]; save(); }
+export async function deleteTrip(tid) { delete data.trips[tid]; delete data.expenses[tid]; delete data.photos[tid]; delete data.files[tid]; save(); }
 
 export const onExpenses = (tid, cb) => watch(() => cb(Object.entries(data.expenses[tid] || {}).map(([k, v]) => ({ id: k, ...clone(v) }))));
 export const newExpenseId = () => id();
 export const newPhotoId = () => id();
-export async function saveExpense(tid, eid, e, isNew = !eid, { addPhotos = [], removePhotos = [] } = {}) {
+export const newFileId = () => id();
+export async function saveExpense(tid, eid, e, isNew = !eid, { addPhotos = [], removePhotos = [], addFiles = [], removeFiles = [] } = {}) {
   data.expenses[tid] ||= {};
   if (!isNew) Object.assign(data.expenses[tid][eid], clone(e), { updatedAtMs: Date.now() });
   else { eid ||= id(); data.expenses[tid][eid] = { ...clone(e), createdAtMs: Date.now() }; }
   const ph = (data.photos[tid] ||= {});
   for (const p of addPhotos) ph[p.id] = { expenseId: eid, data: p.data, at: Date.now() };
   for (const pid of removePhotos) delete ph[pid];
+  const fl = (data.files[tid] ||= {});
+  for (const f of addFiles) fl[f.id] = { expenseId: eid, name: f.name, type: f.type, size: f.size, data: f.data, at: Date.now() };
+  for (const f of removeFiles) delete fl[f.id];
   save(); return eid;
 }
 export async function patchExpense(tid, eid, patch) { if (data.expenses[tid]?.[eid]) { Object.assign(data.expenses[tid][eid], clone(patch)); save(); } }
 export async function deleteExpense(tid, eid) {
   delete data.expenses[tid][eid];
   for (const [pid, p] of Object.entries(data.photos[tid] || {})) if (p.expenseId === eid) delete data.photos[tid][pid];
+  for (const [fid, f] of Object.entries(data.files[tid] || {})) if (f.expenseId === eid) delete data.files[tid][fid];
   save();
 }
 export async function getPhotos(tid, eid) {
   return Object.entries(data.photos[tid] || {}).filter(([, p]) => p.expenseId === eid).map(([k, p]) => ({ id: k, ...p })).sort((a, b) => a.at - b.at);
+}
+
+export async function getAllPhotos(tid) { return Object.entries(data.photos[tid] || {}).map(([k, p]) => ({ id: k, ...p })); }
+export async function getFileData(tid, f) {
+  const x = data.files[tid]?.[f.id];
+  if (!x) throw new Error('file-missing');
+  return x.data;
 }
 
 export async function updateExpenses(tid, updates) {

@@ -344,9 +344,10 @@ export function validateTrip(t) {
   return errors;
 }
 
-export function validateExpense(x) {
+// hasFiles: an entry with an attached file may have amount 0 (passport copy, visa – owner Step 27; the app asks first).
+export function validateExpense(x, { hasFiles = false } = {}) {
   const errors = {};
-  if (!(x.amount > 0)) errors.amount = 'יש להזין סכום גדול מאפס';
+  if (!(x.amount > 0 || (hasFiles && x.amount === 0))) errors.amount = 'יש להזין סכום גדול מאפס';
   if (!x.currency) errors.currency = 'יש לבחור מטבע';
   if (!(x.exchangeRateToTripDefault > 0)) errors.rate = 'חסר שער המרה';
   if (!x.category?.trim()) errors.category = 'יש לבחור קטגוריה';
@@ -669,4 +670,60 @@ export function tapWord(picks, field, i, fresh) {
   else if (fresh) next.place = [i];
   else next.place = next.place.includes(i) ? next.place.filter(x => x !== i) : [...next.place, i];
   return next;
+}
+
+// ---------- Step 27: attachments (photos + files on an expense) ----------
+export const MAX_FILES = 5; // photos and files together, per expense
+export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+export const PART_CHARS = 700000; // base64 characters per Firestore piece (a record holds at most 1 MB)
+const DOC_EXT = /\.(pdf|docx?|xlsx?|csv|txt|rtf|odt|ods)$/i;
+const DOC_TYPE = /^(application\/(pdf|msword|rtf|vnd\.openxmlformats-officedocument\.(wordprocessingml|spreadsheetml)\.[a-z]+|vnd\.ms-excel|vnd\.oasis\.opendocument\.(text|spreadsheet))|text\/(plain|csv))$/i;
+// 'photo' (kept as a shrunk picture), 'doc' (PDF, Word, Excel, text) or 'other'
+export function fileKind(name = '', type = '') {
+  if (/^image\//i.test(type)) return 'photo';
+  if (DOC_TYPE.test(type) || DOC_EXT.test(name)) return 'doc';
+  return 'other';
+}
+// '' = fine, 'full' = already MAX_FILES, 'big' = over MAX_FILE_BYTES (checked when the file is added)
+export const attachProblem = (count, bytes) => count >= MAX_FILES ? 'full' : bytes > MAX_FILE_BYTES ? 'big' : '';
+export function splitParts(s, size = PART_CHARS) {
+  const out = [];
+  for (let i = 0; i < s.length; i += size) out.push(s.slice(i, i + size));
+  return out.length ? out : [''];
+}
+export function fileSizeText(bytes) {
+  if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + 'KB';
+  return (Math.ceil(bytes / 1024 / 1024 * 10 - 1e-9) / 10) + 'MB'; // rounded up: a file just over 5 MB shows 5.1MB
+}
+export const attachCount = e => (e?.photoIds?.length || 0) + (e?.files?.length || 0);
+// Every attachment of a trip for the 🧷 screen: per tab, grouped by expense, newest expense first.
+export function tripAttachments(expenses) {
+  const out = { photo: [], doc: [], other: [] };
+  const sorted = [...expenses].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAtMs || 0) - (a.createdAtMs || 0));
+  for (const e of sorted) {
+    if (e.photoIds?.length) out.photo.push({ expense: e, items: e.photoIds.map(id => ({ id })) });
+    for (const k of ['doc', 'other']) { // (a file with an image type sits in "other": photos are only our shrunk JPEGs)
+      const items = (e.files || []).filter(f => (fileKind(f.name, f.type) === 'doc' ? 'doc' : 'other') === k);
+      if (items.length) out[k].push({ expense: e, items });
+    }
+  }
+  return out;
+}
+// How an attached file may be shown inside the app: only PDF and plain text open in a tab, with this fixed type.
+// The stored type comes from the shared database, so it is never trusted ('text/html', 'image/svg+xml' would run
+// script on the app's own address). '' = hand the file to the phone as a download.
+export function openType(name = '', type = '') {
+  const t = String(type).trim().toLowerCase(), none = !t || t === 'application/octet-stream';
+  if (t === 'application/pdf' || (none && /\.pdf$/i.test(name))) return 'application/pdf';
+  if (t === 'text/plain' || (none && /\.txt$/i.test(name))) return 'text/plain';
+  return '';
+}
+// Short label for a file chip: PDF, DOC, XLS, TXT, or the file's own ending (ZIP, PPTX…).
+export function fileBadge(name = '', type = '') {
+  const ext = (/\.([a-z0-9]{1,5})$/i.exec(name)?.[1] || '').toUpperCase();
+  if (/pdf/i.test(type) || ext === 'PDF') return 'PDF';
+  if (/word|opendocument\.text|rtf/i.test(type) || ['DOC', 'DOCX', 'ODT', 'RTF'].includes(ext)) return 'DOC';
+  if (/sheet|excel|csv/i.test(type) || ['XLS', 'XLSX', 'ODS', 'CSV'].includes(ext)) return 'XLS';
+  if (/^text\//i.test(type) || ext === 'TXT') return 'TXT';
+  return ext || 'FILE';
 }

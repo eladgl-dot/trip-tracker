@@ -704,7 +704,7 @@ async function tripPage(id) {
     if (!e) return;
     const k = hideKey(e.id);
     pending.flush(); // the previous toast (and its undo) is replaced
-    pending.add(k, () => fire(store.deleteExpense(id, e.id, e.photoIds)));
+    pending.add(k, () => { dropCached(id, e.files); return fire(store.deleteExpense(id, e.id, e.photoIds, e.files)); });
     showList(); drawAll();
     undoToast(T('נמחק: {x}', { x: e.details }), () => {
       if (!pending.undo(k)) return;
@@ -744,6 +744,7 @@ async function tripPage(id) {
     io.observe($('#hero')); cleanups.push(() => io.disconnect());
     const onClick = e => {
       if (e.target.closest('[data-edit-trip]')) editTripSheet(st);
+      else if (e.target.closest('[data-files]')) attachmentsScreen(st);
       else if (e.target.closest('[data-people]')) peoplePopup(st);
       else if (e.target.closest('[data-groups]')) groupsSheet(st);
       else if (e.target.closest('#share')) shareTrip(st.trip);
@@ -806,6 +807,7 @@ async function tripPage(id) {
     const t = st.trip;
     const len = t.startDate && t.endDate ? L.daysBetween(t.startDate, t.endDate) : 0;
     const btns = title => [`<a class="ib" href="#/" title="${T('לכל הטיולים')}" aria-label="${T('לכל הטיולים')}">${backArrow()}</a>`, title,
+      `<button class="ib" data-files title="${T('קבצים מצורפים')}" aria-label="${T('קבצים מצורפים')}">🧷</button>`,
       `<button class="ib" data-edit-trip title="${T('עריכת פרטי טיול')}" aria-label="${T('עריכת פרטי טיול')}">✏️</button>`].join('');
     const hero = $('#hero');
     hero.style.cssText = tripStyle(t.color);
@@ -881,7 +883,7 @@ async function tripPage(id) {
           ${e.comment ? `<div class="muted com clamp" data-k="${esc(e.id)}:c">💬 ${esc(e.comment)}</div>` : ''}
           ${e.location ? `<a class="geo-link" href="${esc(L.mapsUrl(e.location))}" target="_blank" rel="noopener">📍 ${esc(e.address || T('מיקום במפה'))}</a>` : ''}
           <div class="acts"><button class="mini" data-edit="${esc(e.id)}" title="${T('עריכה')}" aria-label="${T('עריכה')}">✏️</button>
-            ${e.photoIds?.length ? `<button class="mini pics" data-pics="${esc(e.id)}" title="${T('תמונות')}" aria-label="${T('{n} תמונות', { n: e.photoIds.length })}">📷 ${e.photoIds.length}</button>` : ''}
+            ${L.attachCount(e) ? `<button class="mini pics" data-pics="${esc(e.id)}" title="${T('קבצים מצורפים')}" aria-label="${T('{n} קבצים מצורפים', { n: L.attachCount(e) })}">${CLIP_SVG}<span class="num">${L.attachCount(e)}</span></button>` : ''}
             <button class="mini del" data-del="${esc(e.id)}" title="${T('מחיקה')}" aria-label="${T('מחיקה')}">🗑️</button></div>
         </div>
         <div class="amt ${inc ? 'pos' : 'neg'}"><span class="money">${esc(big)}</span>
@@ -912,6 +914,8 @@ async function tripPage(id) {
     $$('[data-edit]', host).forEach(b => b.onclick = () => expenseSheet(st, st.expenses.find(x => x.id === b.dataset.edit)));
     markClamps();
     $$('[data-pics]', host).forEach(b => b.onclick = async () => {
+      const ex = st.expenses.find(x => x.id === b.dataset.pics);
+      if (ex?.files?.length) return expenseSheet(st, ex); // files: the sheet shows and opens them
       const pics = await store.getPhotos(st.trip.id, b.dataset.pics).catch(err => (reportError(err), []));
       const ok = pics.map(p => p.data).filter(L.isPhotoData);
       if (ok.length) photoViewer(ok, 0); else toast(T('התמונות עדיין לא סונכרנו למכשיר הזה'));
@@ -1260,9 +1264,11 @@ function expenseSheet(st, existing, type = 'expense') {
       <div class="field" data-f="details"><label class="lbl" for="x-det">${T('פירוט')} *</label><input id="x-det" maxlength="120" placeholder="${T('למשל: כרטיסים לרכבל')}" value="${esc(e.details)}"><p class="err"></p></div>
       <div class="field"><label class="lbl" for="x-com">${T('הערה')}</label><input id="x-com" maxlength="200" placeholder="${T('אופציונלי')}" value="${esc(e.comment || '')}"></div>
       <div class="geo-box" id="x-geo" aria-live="polite"></div>
-      <div class="field"><span class="lbl">${T('תמונות (עד {n})', { n: L.MAX_PHOTOS })}</span><div class="photos" id="x-photos"></div>
+      <div class="field"><span class="lbl att-lbl">${CLIP_SVG}<span>${T('קבצים מצורפים')}</span><span class="num" id="x-att-n"></span></span><div class="photos" id="x-photos"></div>
+        <div class="att-btns" id="x-att-btns"></div>
         <input type="file" id="x-cam" accept="image/*" capture="environment" hidden>
-        <input type="file" id="x-gal" accept="image/*" multiple hidden></div>
+        <input type="file" id="x-gal" accept="image/*" multiple hidden>
+        <input type="file" id="x-file" multiple hidden></div>
       <div class="${existing ? 'row2' : ''}" style="${existing ? 'grid-template-columns:auto 1fr 1fr' : 'display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)'}">
         ${existing ? `<button type="button" class="btn danger" data-del title="${T('מחיקה')}">🗑️</button>` : ''}
         <button type="button" class="btn ghost" data-x>${T('ביטול')}</button><button class="btn primary" id="x-save">${T('שמירה')}</button>
@@ -1391,38 +1397,71 @@ function expenseSheet(st, existing, type = 'expense') {
   if (existing) drawGeo(); else startGeo();
   m.result.then(() => stopGeo());
 
-  // ---- photos (up to MAX_PHOTOS, shrunk on the phone)
-  const pics = [], removed = [];
-  let shrinking = 0;
-  const picsBox = $('#x-photos', el);
+  // ---- attachments: photos (shrunk on the phone) and files (PDF, Word, anything up to 5 MB) – 5 in all (Step 27)
+  const pics = [], removed = [], docs = [], removedFiles = [];
+  let shrinking = 0, reading = 0;
+  let unseen = existing?.photoIds?.length || 0; // saved photos not loaded (yet) still count toward the 5
+  const used = () => pics.length + unseen + docs.length + shrinking + reading;
+  const picsBox = $('#x-photos', el), attBtns = $('#x-att-btns', el);
+  if (existing?.files?.length) docs.push(...existing.files.map(f => ({ ...f })));
   function drawPics() {
     picsBox.innerHTML = pics.map((p, i) => `<div class="thumb"><button type="button" class="open" data-open="${i}" aria-label="${T('הצגת תמונה {n}', { n: i + 1 })}"><img src="${L.isPhotoData(p.data) ? p.data : ''}" alt=""></button>
         <button type="button" class="x" data-rm="${i}" aria-label="${T('הסרת תמונה {n}', { n: i + 1 })}">✕</button></div>`).join('')
-      + (shrinking ? `<div class="thumb busy">⏳</div>` : '')
-      + (pics.length + shrinking < L.MAX_PHOTOS ? `<button type="button" class="btn ghost sm" data-cam>📷 ${T('צילום')}</button><button type="button" class="btn ghost sm" data-gal>🖼️ ${T('גלריה')}</button>` : '');
+      + docs.map((f, i) => `<div class="doc-chip"><button type="button" class="open" data-fopen="${i}" title="${esc(f.name)}"><span class="ic" aria-hidden="true">${fileIcon(f)}</span>
+          <span class="nm"><b dir="auto">${esc(f.name)}</b><small class="num">${L.fileSizeText(f.size)}</small></span></button>
+          <button type="button" class="x" data-frm="${i}" aria-label="${T('הסרת {x}', { x: f.name })}">✕</button></div>`).join('')
+      + (shrinking || reading ? `<div class="thumb busy">⏳</div>` : '');
+    const n = used();
+    $('#x-att-n', el).textContent = n ? `${n} / ${L.MAX_FILES}` : '';
+    attBtns.innerHTML = n < L.MAX_FILES
+      ? `<button type="button" class="btn ghost sm" data-cam>📷 ${T('צילום')}</button><button type="button" class="btn ghost sm" data-gal>🖼️ ${T('גלריה')}</button>`
+        + `<button type="button" class="btn ghost sm" data-file>📄 ${T('קובץ')}</button><button type="button" class="btn ghost sm" data-paste>📋 ${T('הדבקה')}</button>`
+      : `<p class="muted small">${T('אפשר עד {n} קבצים להוצאה. להוספה – הסירו קובץ.', { n: L.MAX_FILES })}</p>`;
     $$('[data-open]', picsBox).forEach(b => b.onclick = () => photoViewer(pics.map(p => p.data), +b.dataset.open));
     $$('[data-rm]', picsBox).forEach(b => b.onclick = () => { const [p] = pics.splice(+b.dataset.rm, 1); if (p.id) removed.push(p.id); drawPics(); });
-    const cam = $('[data-cam]', picsBox), gal = $('[data-gal]', picsBox);
-    if (cam) cam.onclick = () => $('#x-cam', el).click();
-    if (gal) gal.onclick = () => $('#x-gal', el).click();
+    $$('[data-fopen]', picsBox).forEach(b => b.onclick = () => openFile(t.id, docs[+b.dataset.fopen]));
+    $$('[data-frm]', picsBox).forEach(b => b.onclick = () => { const [f] = docs.splice(+b.dataset.frm, 1); if (f.id) removedFiles.push(f); drawPics(); });
+    const on = (sel, fn) => { const b = $(sel, attBtns); if (b) b.onclick = fn; };
+    on('[data-cam]', () => $('#x-cam', el).click());
+    on('[data-gal]', () => $('#x-gal', el).click());
+    on('[data-file]', () => $('#x-file', el).click());
+    on('[data-paste]', async () => {
+      try { const files = await clipboardImages(); if (files.length) return addAny(files); } catch {}
+      toast(T('אין תמונה בלוח. העתיקו צילום מסך ונסו שוב'));
+    });
   }
-  const addFiles = async input => {
-    const all = [...input.files];
-    const files = all.slice(0, L.MAX_PHOTOS - pics.length - shrinking);
-    input.value = '';
-    if (all.length > files.length) toast(T('אפשר עד {n} תמונות', { n: L.MAX_PHOTOS }));
-    for (const f of files) {
-      shrinking++; drawPics();
-      try { pics.push({ data: await shrinkImage(f) }); } catch { toast(T('לא הצלחתי לקרוא את התמונה'), 'bad'); }
-      shrinking--; drawPics();
+  // Any file: a picture is shrunk to a photo; anything else is kept as it is (5 MB at most, checked right here).
+  async function addAny(list) {
+    for (const f of [...list]) {
+      const fk = L.fileKind(f.name, f.type);
+      const problem = L.attachProblem(used(), fk === 'photo' ? 0 : f.size);
+      if (problem === 'full') { toast(T('אפשר עד {n} קבצים להוצאה', { n: L.MAX_FILES }), 'bad'); break; }
+      if (problem === 'big') { toast('⚠️ ' + T('{x} גדול מדי ({s}). אפשר לצרף קבצים עד 5MB.', { x: f.name, s: L.fileSizeText(f.size) }), 'bad'); continue; }
+      if (fk === 'photo') {
+        shrinking++; drawPics();
+        try { pics.push({ data: await shrinkImage(f) }); } catch { toast(T('לא הצלחתי לקרוא את התמונה'), 'bad'); }
+        shrinking--;
+      } else {
+        reading++; drawPics();
+        try { docs.push({ name: f.name || T('קובץ'), type: f.type || '', size: f.size, data: await readB64(f) }); } catch { toast(T('לא הצלחתי לקרוא את הקובץ'), 'bad'); }
+        reading--;
+      }
+      if (el.isConnected) drawPics();
     }
-  };
-  $('#x-cam', el).onchange = ev => addFiles(ev.target);
-  $('#x-gal', el).onchange = ev => addFiles(ev.target);
+  }
+  for (const id of ['#x-cam', '#x-gal', '#x-file']) $(id, el).onchange = ev => { addAny(ev.target.files); ev.target.value = ''; };
+  // Ctrl+V / paste anywhere in the sheet: a copied screenshot or file becomes an attachment (text pastes as usual)
+  el.addEventListener('paste', ev => {
+    const files = [...(ev.clipboardData?.files || [])];
+    if (!files.length || ev.clipboardData.types.includes('text/plain')) return; // copied text (even with a picture) pastes as text
+    ev.preventDefault(); addAny(files);
+  });
   drawPics();
   if (existing?.photoIds?.length) store.getPhotos(t.id, existing.id).then(list => {
-    const saved = list.filter(p => existing.photoIds.includes(p.id) && L.isPhotoData(p.data));
-    pics.unshift(...saved.map(p => ({ id: p.id, data: p.data }))); drawPics();
+    const saved = list.filter(p => existing.photoIds.includes(p.id) && !removed.includes(p.id) && L.isPhotoData(p.data));
+    pics.unshift(...saved.map(p => ({ id: p.id, data: p.data })));
+    unseen = Math.max(0, existing.photoIds.length - saved.length - removed.length);
+    if (el.isConnected) drawPics();
   }).catch(reportError);
 
   // ---- receipt scan (new expense only): read the photo on the phone, fill the form, the user checks and saves
@@ -1444,7 +1483,7 @@ function expenseSheet(st, existing, type = 'expense') {
       scanBtn.disabled = true;
       const before = { amt: amt.value, cur: cur.value, date: $('#x-date', el).value }; // fields the user changes while it reads stay theirs
       // the receipt photo is kept with the expense
-      if (pics.length + shrinking < L.MAX_PHOTOS) addFiles({ files: [file], set value(v) {} });
+      if (used() < L.MAX_FILES) addAny([file]);
       let read = null;
       try { read = await readReceipt(file, status); }
       catch (err) {
@@ -1500,8 +1539,10 @@ function expenseSheet(st, existing, type = 'expense') {
   $('form', el).onsubmit = async ev => {
     ev.preventDefault();
     if (r.loading) return toast(T('רגע, טוען שער…'));
-    if (shrinking) return toast(T('רגע, מעבד תמונה…'));
-    const amount = L.parseAmount(amt.value);
+    if (shrinking || reading) return toast(T('רגע, מעבד תמונה…'));
+    const hasFiles = pics.length + unseen + docs.length > 0;
+    let amount = L.parseAmount(amt.value);
+    if (hasFiles && !amt.value.trim()) amount = 0; // a file without a cost (passport copy, visa – owner Step 27)
     const rate = cur.value === t.defaultCurrency ? 1 : r.rate;
     const amt2 = amount > 0 ? L.round2(amount) : amount;
     const x = {
@@ -1513,19 +1554,153 @@ function expenseSheet(st, existing, type = 'expense') {
       location: loc
     };
     if (locChanged || !loc) x.address = ''; // filled in from the new point by fillAddresses
-    const errors = L.validateExpense(x);
+    const errors = L.validateExpense(x, { hasFiles });
     $$('[data-f]', el).forEach(f => { const er = errors[f.dataset.f]; f.classList.toggle('invalid', !!er); $('.err', f).textContent = er ? T(er) : ''; });
     if (errors.rate) { toast(T('חסר שער המרה. הזינו שער ידני'), 'bad'); return; }
     const bad = $('.invalid input, .invalid select', el);
     if (bad) { bad.focus(); return; }
+    if (x.amount === 0 && !(await confirmBox(T('לא הוזן סכום'), T('הרשומה תישמר בלי עלות ולא תשנה את המאזן. לשמור בכל זאת?'), { ok: T('שמירה') }))) { amt.focus(); return; }
+    if (!el.isConnected) return;
     if (!categories.includes(x.category) && x.category !== L.UNCATEGORIZED) fire(store.addCategory(x.category));
     const eid = existing?.id || store.newExpenseId(t.id);
     const addPhotos = pics.filter(p => !p.id).map(p => ({ id: store.newPhotoId(t.id), data: p.data }));
     x.photoIds = L.nextPhotoIds(existing?.photoIds, removed, addPhotos.map(p => p.id));
-    fire(store.saveExpense(t.id, eid, x, !existing, { addPhotos, removePhotos: removed }));
+    const addFiles = docs.filter(f => !f.id).map(f => ({ id: store.newFileId(t.id), name: f.name, type: f.type, size: f.size, data: f.data }));
+    x.files = [...docs.filter(f => f.id).map(({ id, name, type, size, parts }) => ({ id, name, type, size, parts })),
+      ...addFiles.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size, parts: L.splitParts(f.data).length }))];
+    dropCached(t.id, removedFiles);
+    fire(store.saveExpense(t.id, eid, x, !existing, { addPhotos, removePhotos: removed, addFiles, removeFiles: removedFiles }));
     m.close(); toast(existing ? T('עודכן') : T('נשמר') + ' ✓', 'good');
   };
   if (!existing) setTimeout(() => amt.focus(), 80);
+}
+
+// ---------------------------------------------------------------- attachments (Step 27)
+// A plain paper clip (own drawing: the 📎 emoji is drawn as "Clippy" on Windows – owner).
+const CLIP_SVG = '<svg class="clip" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const FILE_CACHE = 'tt-files'; // opened files, kept on the phone (sw.js leaves this cache alone)
+const fileKey = (tid, fid) => location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '') + `tt-file/${tid}/${fid}`;
+// A small file-type label (PDF / DOC / XLS / TXT / ZIP…) instead of emoji that look like books.
+function fileIcon(f) {
+  const b = L.fileBadge(f.name, f.type);
+  return `<span class="ft ft-${['PDF', 'DOC', 'XLS', 'TXT'].includes(b) ? b.toLowerCase() : 'other'}">${esc(b)}</span>`;
+}
+const b64ToBlob = (b64, type) => {
+  const bin = atob(b64), a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return new Blob([a], { type: type || 'application/octet-stream' });
+};
+const readB64 = file => new Promise((ok, bad) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => bad(r.error);
+  r.readAsDataURL(file);
+});
+async function cachedFileIds(tid) {
+  try {
+    const pre = fileKey(tid, ''), keys = await (await caches.open(FILE_CACHE)).keys();
+    return new Set(keys.map(k => k.url).filter(u => u.startsWith(pre)).map(u => u.slice(pre.length)));
+  } catch { return new Set(); }
+}
+// Opens an attached file: f = { id, name, type, size, parts } (saved) or { name, type, data } (not saved yet).
+// The first open downloads it and keeps it on the phone, so after that it opens offline (owner 6A).
+// PDF / text / pictures open in a new tab; Word, Excel and the rest are handed to the phone (download → its app).
+async function openFile(tid, f) {
+  const safe = L.openType(f.name, f.type); // never the stored type: it comes from the shared database
+  const win = safe ? window.open('', '_blank') : null; // opened now, while the tap still counts (popup blockers)
+  try {
+    let blob = null;
+    if (f.data) blob = b64ToBlob(f.data);
+    else {
+      const key = fileKey(tid, f.id);
+      let c = null;
+      try { c = await caches.open(FILE_CACHE); const hit = await c.match(key); if (hit) blob = await hit.blob(); } catch {}
+      if (!blob) {
+        toast(T('מוריד את הקובץ…'));
+        blob = b64ToBlob(await store.getFileData(tid, f));
+        try { await c?.put(key, new Response(blob, { headers: { 'content-type': 'application/octet-stream' } })); } catch {}
+      }
+    }
+    blob = new Blob([blob], { type: safe || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    if (win) win.location.href = url;
+    else { const a = document.createElement('a'); a.href = url; a.download = f.name || 'file'; document.body.append(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60000); // a big PDF may take a while to load in its tab
+    return true;
+  } catch (err) {
+    win?.close();
+    console.error(err);
+    toast(navigator.onLine ? T('לא הצלחתי לפתוח את הקובץ') : T('הקובץ עוד לא שמור בטלפון. צריך חיבור כדי להוריד אותו פעם אחת'), 'bad');
+    return false;
+  }
+}
+// Opened copies of deleted files leave the phone too.
+async function dropCached(tid, files) {
+  if (!files?.length) return;
+  try { const c = await caches.open(FILE_CACHE); await Promise.all(files.map(f => c.delete(fileKey(tid, f.id)))); } catch {}
+}
+// Pictures on the clipboard (a screenshot), for the 📋 button.
+async function clipboardImages() {
+  if (!navigator.clipboard?.read) return [];
+  const out = [];
+  for (const it of await navigator.clipboard.read()) {
+    const ty = it.types.find(x => x.startsWith('image/'));
+    if (ty) out.push(new File([await it.getType(ty)], `screenshot-${Date.now()}.${ty.split('/')[1]}`, { type: ty }));
+  }
+  return out;
+}
+
+// All the trip's attachments (🧷 in the header): tabs Photos / Documents / Other, grouped by expense, each can open its expense.
+const ATT_TABS = [['photo', N('תמונות')], ['doc', N('מסמכים')], ['other', N('אחר')]];
+function attachmentsScreen(st) {
+  const tid = st.trip.id;
+  const all = L.tripAttachments(st.expenses);
+  const count = k => all[k].reduce((n, g) => n + g.items.length, 0);
+  let tab = ATT_TABS.find(([k]) => count(k))?.[0] || 'photo';
+  let photos = null, cached = new Set();
+  const m = modal(`<div class="att-top"><button type="button" class="icon-btn" data-x aria-label="${T('סגירה')}">✕</button><h2>🧷 ${T('קבצים מצורפים')}</h2></div>
+    <div class="att-tabs" role="tablist">${ATT_TABS.map(([k, he]) => `<button type="button" role="tab" data-tab="${k}">${T(he)} <span class="num">(${count(k)})</span></button>`).join('')}</div>
+    <div class="att-body" id="att-body"></div>`, { label: T('קבצים מצורפים') });
+  m.el.classList.add('att-dialog');
+  const body = $('#att-body', m.el);
+  const head = e => `<bdi>${esc(formatDate(e.date, {}))}</bdi> · ${esc(e.details)}`;
+  const go = id => { const ex = st.expenses.find(x => x.id === id); m.close(); if (ex) expenseSheet(st, ex); };
+  const draw = async () => {
+    $$('[data-tab]', m.el).forEach(b => { b.classList.toggle('on', b.dataset.tab === tab); b.setAttribute('aria-selected', b.dataset.tab === tab); });
+    const groups = all[tab];
+    if (!groups.length) { body.innerHTML = `<p class="muted center att-empty">${T('אין כאן קבצים עדיין')}</p>`; return; }
+    if (tab === 'photo') {
+      if (!photos) {
+        body.innerHTML = '<p class="muted center att-empty">⏳</p>';
+        const list = await store.getAllPhotos(tid).catch(err => (reportError(err), []));
+        photos = new Map(list.filter(p => L.isPhotoData(p.data)).map(p => [p.id, p.data]));
+        if (tab !== 'photo' || !m.el.isConnected) return;
+      }
+      body.innerHTML = groups.map(g => `<button type="button" class="att-head" data-go="${esc(g.expense.id)}">${head(g.expense)} <span aria-hidden="true">${fwdArrow()}</span></button>
+        <div class="att-grid">${g.items.map(it => photos.has(it.id)
+          ? `<button type="button" class="att-ph" data-ph="${esc(g.expense.id)}" data-pid="${esc(it.id)}" aria-label="${T('תמונות')}"><img src="${photos.get(it.id)}" alt=""></button>`
+          : `<div class="att-ph missing" title="${T('התמונות עדיין לא סונכרנו למכשיר הזה')}">⏳</div>`).join('')}</div>`).join('');
+      $$('[data-ph]', body).forEach(b => b.onclick = () => {
+        const list = groups.find(x => x.expense.id === b.dataset.ph).items.filter(it => photos.has(it.id));
+        photoViewer(list.map(it => photos.get(it.id)), list.findIndex(it => it.id === b.dataset.pid), { onGo: () => go(b.dataset.ph) });
+      });
+    } else {
+      body.innerHTML = groups.map(g => g.items.map(f => `<div class="att-row">
+          <button type="button" class="att-open" data-fid="${esc(f.id)}" data-eid="${esc(g.expense.id)}"><span class="ic" aria-hidden="true">${fileIcon(f)}</span>
+            <span class="t"><b dir="auto">${esc(f.name)}</b><small>${head(g.expense)} · <span class="num">${L.fileSizeText(f.size)}</span></small>
+            ${cached.has(f.id) ? `<small class="saved">✓ ${T('שמור בטלפון')}</small>` : ''}</span></button>
+          <button type="button" class="go" data-go="${esc(g.expense.id)}">${T('להוצאה')}</button></div>`).join('')).join('');
+      $$('[data-fid]', body).forEach(b => b.onclick = async () => {
+        const f = groups.find(x => x.expense.id === b.dataset.eid).items.find(x => x.id === b.dataset.fid);
+        if (await openFile(tid, f) && !cached.has(f.id)) { cached = await cachedFileIds(tid); if (m.el.isConnected) draw(); }
+      });
+    }
+    $$('[data-go]', body).forEach(b => b.onclick = () => go(b.dataset.go));
+  };
+  $$('[data-tab]', m.el).forEach(b => b.onclick = () => { tab = b.dataset.tab; draw(); });
+  $('[data-x]', m.el).onclick = () => m.close();
+  cachedFileIds(tid).then(s => { cached = s; if (tab !== 'photo' && m.el.isConnected) draw(); });
+  draw();
+  $('[data-x]', m.el).focus();
 }
 
 // ---------------------------------------------------------------- receipt check (Step 26)
@@ -1609,12 +1784,13 @@ function receiptCheck(scan) {
 
 // ---------------------------------------------------------------- admin
 // Full-screen photo viewer with previous / next.
-function photoViewer(list, start) {
+function photoViewer(list, start, { onGo } = {}) {
   let i = start;
   const m = modal(`<div class="viewer"><img alt=""><div class="vbar">
       <button type="button" class="btn ghost sm" data-p aria-label="${T('הקודמת')}">${backArrow()}</button>
       <span class="num" aria-live="polite"></span>
       <button type="button" class="btn ghost sm" data-n aria-label="${T('הבאה')}">${fwdArrow()}</button>
+      ${onGo ? `<button type="button" class="btn ghost sm" data-go>${T('להוצאה')}</button>` : ''}
       <button type="button" class="btn primary sm" data-x>${T('סגירה')}</button></div></div>`, { label: T('תמונות') });
   m.el.classList.add('photo-dialog');
   const draw = () => {
@@ -1625,6 +1801,7 @@ function photoViewer(list, start) {
   $('[data-p]', m.el).onclick = () => { if (i > 0) { i--; draw(); } };
   $('[data-n]', m.el).onclick = () => { if (i < list.length - 1) { i++; draw(); } };
   $('[data-x]', m.el).onclick = () => m.close();
+  if (onGo) $('[data-go]', m.el).onclick = () => { m.close(); onGo(); };
   draw();
 }
 

@@ -583,3 +583,44 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 .rc-chip.place.on { border-color: var(--pl); background: var(--pl-bg); }
 .rc-chip.chg b::after { content: " ✓"; color: #15803D; }
 .rc-panel .btn { width: 100%; }
+/* Step 27: attachments – files on an expense, and the 🧷 screen */
+.clip { flex: none; vertical-align: -3px; }
+.att-lbl { display: flex; align-items: center; gap: 6px; }
+.att-lbl .num { color: var(--ink2); font-weight: 600; } .att-lbl .num:not(:empty)::before { content: '· '; }
+.att-btns { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.att-btns .small { margin: 0; }
+.doc-chip { position: relative; height: 72px; max-width: 190px; flex: none; }
+.doc-chip .open { display: flex; align-items: center; gap: 6px; height: 100%; width: 100%; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); padding-block: 0; padding-inline: 8px 30px; text-align: start; color: var(--ink); font: inherit; cursor: pointer; }
+.doc-chip .ic { font-size: 26px; }
+.doc-chip .nm { min-width: 0; line-height: 1.2; }
+.doc-chip .nm b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.doc-chip .nm small { font-size: 12px; color: var(--ink2); }
+.doc-chip .x { position: absolute; top: 4px; inset-inline-end: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(15,23,42,.65); color: #fff; font-size: 16px; display: grid; place-items: center; }
+.mini.pics { display: inline-flex; align-items: center; gap: 4px; }
+.mini.pics .num { font-size: 16px; }
+.scrim:has(.att-dialog) { padding: 0; }
+.dialog.att-dialog { width: 100%; max-width: 720px; height: 100dvh; max-height: none; border-radius: 0; padding: 0; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+.att-top { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); }
+.att-top h2 { margin: 0; font-size: 20px; }
+.att-tabs { display: flex; gap: 3px; background: var(--line); border-radius: 12px; padding: 3px; margin: 0 var(--s4) var(--s3); }
+.att-tabs button { flex: 1; border: 0; background: none; border-radius: 9px; padding: 8px 4px; min-height: 40px; font: inherit; font-size: 15px; color: var(--ink2); cursor: pointer; }
+.att-tabs button.on { background: var(--card); color: var(--ink); font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.att-body { flex: 1; overflow: auto; padding: 0 var(--s4) calc(var(--s4) + env(safe-area-inset-bottom)); }
+.att-empty { margin-top: 40px; }
+.att-head { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; padding: 10px 2px 6px; font: inherit; font-size: 14px; font-weight: 700; color: var(--ink2); text-align: start; cursor: pointer; min-height: 40px; }
+.att-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.att-ph { aspect-ratio: 1; border: 0; padding: 0; border-radius: 10px; overflow: hidden; background: var(--card); cursor: zoom-in; display: grid; place-items: center; font-size: 22px; }
+.att-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att-row { display: flex; align-items: center; gap: var(--s2); background: var(--card); border-radius: 14px; padding: 6px 10px; margin-top: var(--s2); box-shadow: var(--shadow); }
+.att-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 4px 0; font: inherit; color: var(--ink); text-align: start; cursor: pointer; min-height: 48px; }
+.att-open .ic { font-size: 30px; flex: none; }
+.att-open .t { min-width: 0; }
+.att-open b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-open small { display: block; font-size: 13px; color: var(--ink2); }
+.att-open .saved { color: #047857; }
+.att-row .go { flex: none; border: 1.5px solid var(--sky-chip); background: var(--sky-soft); color: var(--sky-d); border-radius: var(--pill); padding: 6px 14px; min-height: 44px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+:root[data-theme=dark] .att-open .saved { color: #6EE7B7; }
+@media (prefers-color-scheme: dark) { :root[data-theme=auto] .att-open .saved { color: #6EE7B7; } }
+.ft { display: inline-grid; place-items: center; min-width: 38px; height: 46px; padding: 0 4px; border-radius: 6px 12px 6px 6px; font: 800 12px/1 Heebo, system-ui, sans-serif; letter-spacing: .02em; color: #fff; background: #64748B; direction: ltr; }
+.ft-pdf { background: #B91C1C; } .ft-doc { background: #1D4ED8; } .ft-xls { background: #15803D; } .ft-txt { background: #475569; } .ft-other { background: #7C3AED; }
+.doc-chip .ft { height: 40px; min-width: 34px; font-size: 11px; }
