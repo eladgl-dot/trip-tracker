@@ -551,3 +551,35 @@ a.fab { text-decoration: none; display: inline-flex; align-items: center; gap: 8
 @media (min-width: 560px) {
   .topbar.home-top { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "brand pills admin"; }
 }
+/* Step 26: receipt check screen – the photo with the words the OCR found, one colour per field */
+.scan-st.done { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.scan-check { border: 0; background: none; padding: 4px 0; min-height: 44px; font: inherit; font-weight: 700; color: var(--sky-d, #0369A1); text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.scrim:has(.rc-dialog) { padding: 0; }
+.dialog.rc-dialog { --amt: #16A34A; --amt-bg: rgba(22,163,74,.18); --dt: #2563EB; --dt-bg: rgba(37,99,235,.16); --pl: #EA580C; --pl-bg: rgba(234,88,12,.16);
+  width: 100%; max-width: 720px; height: 100dvh; max-height: none; border-radius: 0; padding: 0; background: #111827; display: flex; flex-direction: column; overflow: hidden; }
+.rc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; color: #fff; }
+.rc-top h2 { margin: 0; font-size: 19px; color: #fff; }
+.rc-top .icon-btn { background: rgba(255,255,255,.12); color: #fff; box-shadow: none; font-size: 20px; }
+.rc-top .icon-btn[aria-pressed=true] { background: var(--sky); color: #0F172A; }
+.rc-photo { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; }
+.rc-img { position: relative; width: 100%; margin: auto; flex: none; }
+.rc-img.zoom { width: 220%; }
+.rc-img img { display: block; width: 100%; height: auto; border-radius: 4px; }
+.rc-w { position: absolute; padding: 0; margin: 0; border: 0; background: rgba(56,189,248,.06); outline: 1.5px dashed rgba(71,85,105,.75); outline-offset: 1px; border-radius: 3px; cursor: pointer; }
+.rc-w.amount { outline: 3px solid var(--amt); background: var(--amt-bg); }
+.rc-w.date { outline: 3px solid var(--dt); background: var(--dt-bg); }
+.rc-w.place { outline: 3px solid var(--pl); background: var(--pl-bg); }
+.rc-w:focus-visible { outline: 3px solid var(--sky); }
+.rc-panel { background: var(--card); border-radius: 20px 20px 0 0; padding: 10px 12px calc(12px + env(safe-area-inset-bottom)); }
+.rc-hint { margin: 0 2px 8px; font-size: 15px; color: var(--ink2); min-height: 1.4em; }
+.rc-chips { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 6px; margin-bottom: 10px; }
+.rc-chip { text-align: start; border: 2px solid var(--line); border-radius: 12px; padding: 5px 8px; background: var(--bg); color: var(--ink); font: inherit; line-height: 1.25; min-height: 52px; cursor: pointer; min-width: 0; }
+.rc-chip small { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ink2); font-weight: 600; }
+.rc-chip small i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.rc-chip b { display: block; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: isolate; }
+.rc-chip.amount i { background: var(--amt); } .rc-chip.date i { background: var(--dt); } .rc-chip.place i { background: var(--pl); }
+.rc-chip.amount.on { border-color: var(--amt); background: var(--amt-bg); }
+.rc-chip.date.on { border-color: var(--dt); background: var(--dt-bg); }
+.rc-chip.place.on { border-color: var(--pl); background: var(--pl-bg); }
+.rc-chip.chg b::after { content: " ✓"; color: #15803D; }
+.rc-panel .btn { width: 100%; }

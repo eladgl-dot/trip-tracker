@@ -1445,8 +1445,8 @@ function expenseSheet(st, existing, type = 'expense') {
       const before = { amt: amt.value, cur: cur.value, date: $('#x-date', el).value }; // fields the user changes while it reads stay theirs
       // the receipt photo is kept with the expense
       if (pics.length + shrinking < L.MAX_PHOTOS) addFiles({ files: [file], set value(v) {} });
-      let text = '';
-      try { text = await readReceipt(file, status); }
+      let read = null;
+      try { read = await readReceipt(file, status); }
       catch (err) {
         console.error(err);
         stBox.classList.add('done');
@@ -1455,7 +1455,10 @@ function expenseSheet(st, existing, type = 'expense') {
       }
       scanBtn.disabled = false;
       if (!el.isConnected) return; // sheet closed meanwhile
-      const got = L.parseReceipt(text, { currency: cur.value, categories });
+      // Hebrew lines split amounts ("84.90" → "90 84"); the word boxes put them back together (Step 26)
+      const tokens = L.receiptTokens(read.words);
+      const got = L.parseReceipt(tokens.length ? L.receiptText(tokens) : read.text, { currency: cur.value, categories });
+      const scan = tokens.length ? { tokens, image: read.image, w: read.w, h: read.h, picks: L.receiptPicks(tokens, got) } : null;
       const filled = [];
       const amtFree = amt.value === before.amt, curFree = cur.value === before.cur;
       if (got.amount > 0 && amtFree) { amt.value = got.amount.toFixed(2); mark(amt); filled.push(T('סכום')); }
@@ -1463,9 +1466,28 @@ function expenseSheet(st, existing, type = 'expense') {
       else drawRate();
       if (got.date && $('#x-date', el).value === before.date) { $('#x-date', el).value = got.date; mark($('#x-date', el)); filled.push(T('תאריך')); }
       if (got.details && !$('#x-det', el).value.trim()) { $('#x-det', el).value = got.details; mark($('#x-det', el)); filled.push(T('פירוט')); }
-      if (got.category && !chosen) { chosen = got.category; drawCats(); mark(cat); filled.push(T('קטגוריה')); }
+      let scanCat = '';
+      if (got.category && !chosen) { chosen = scanCat = got.category; drawCats(); mark(cat); filled.push(T('קטגוריה')); }
       stBox.classList.remove('hidden'); stBox.classList.add('done');
-      stBox.textContent = filled.length ? '🟨 ' + T('מולא מהקבלה: {x} – בדקו את השדות המסומנים ושמרו', { x: filled.join(', ') }) : '⚠️ ' + T('לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.');
+      stBox.innerHTML = `<span>${esc(filled.length ? '🟨 ' + T('מולא מהקבלה: {x} – בדקו את השדות המסומנים ושמרו', { x: filled.join(', ') }) : '⚠️ ' + T('לא נמצא סכום בקבלה. אפשר לצלם שוב (ישר ובאור טוב) או למלא ידנית.'))}</span>`
+        + (scan ? `<button type="button" class="scan-check" id="x-scan-check">🔍 ${T('בדיקה על הקבלה')}</button>` : '');
+      // check screen: the fixes go into the form
+      if (scan) $('#x-scan-check', el).onclick = async () => {
+        const res = await receiptCheck(scan);
+        if (!res || !el.isConnected) return;
+        scan.picks = res.picks;
+        const val = f => L.wordValue(f, res.picks[f].map(i => scan.tokens[i].text));
+        if (res.changed.has('amount') && val('amount')) { amt.value = val('amount').toFixed(2); mark(amt); drawRate(); }
+        if (res.changed.has('date') && val('date')) { $('#x-date', el).value = val('date'); mark($('#x-date', el)); }
+        if (res.changed.has('place')) {
+          const place = val('place');
+          if (place) { $('#x-det', el).value = place; mark($('#x-det', el)); } // all words removed: keep what was there
+          if (!chosen || chosen === scanCat) { // the category came from the scan: pick it again from the new place
+            const c = L.parseReceipt(place, { categories }).category;
+            if (c && c !== chosen) { chosen = scanCat = c; drawCats(); mark(cat); }
+          }
+        }
+      };
     };
     $('#x-scan-cam', el).onchange = onScan;
     $('#x-scan-gal', el).onchange = onScan;
@@ -1504,6 +1526,85 @@ function expenseSheet(st, existing, type = 'expense') {
     m.close(); toast(existing ? T('עודכן') : T('נשמר') + ' ✓', 'good');
   };
   if (!existing) setTimeout(() => amt.focus(), 80);
+}
+
+// ---------------------------------------------------------------- receipt check (Step 26)
+// The receipt with the words the OCR found. Each field has its own colour; tap a field, then the right word.
+// With no field chosen, a tapped word goes to the field it looks like (a date, a number, else the place).
+// Resolves { picks, changed } on "סיום", undefined when closed.
+const RC_FIELDS = [['amount', N('סכום')], ['date', N('תאריך')], ['place', N('מקום')]];
+function receiptCheck(scan) {
+  const { tokens, w, h } = scan;
+  let picks = scan.picks, field = '', fresh = false;
+  const changed = new Set();
+  const pct = v => (v * 100).toFixed(3) + '%';
+  const m = modal(`<div class="rc-top"><button type="button" class="icon-btn" data-x aria-label="${T('סגירה')}">✕</button>
+      <h2>${T('בדיקה על הקבלה')}</h2>
+      <button type="button" class="icon-btn" data-zoom aria-pressed="false" aria-label="${T('הגדלה')}">🔍</button></div>
+    <div class="rc-photo"><div class="rc-img"><img alt="${T('הקבלה')}" src="${scan.image}">
+      ${tokens.map((tk, i) => `<button type="button" class="rc-w" data-i="${i}" aria-label="${esc(tk.text)}" style="left:${pct(tk.b[0] / w)};top:${pct(tk.b[1] / h)};width:${pct((tk.b[2] - tk.b[0]) / w)};height:${pct((tk.b[3] - tk.b[1]) / h)}"></button>`).join('')}
+    </div></div>
+    <div class="rc-panel"><p class="rc-hint" aria-live="polite"></p>
+      <div class="rc-chips">${RC_FIELDS.map(([f, he]) => `<button type="button" class="rc-chip ${f}" data-f="${f}" aria-pressed="false"><small><i></i>${T(he)}</small><b></b></button>`).join('')}</div>
+      <button type="button" class="btn primary" data-ok>${T('סיום')}</button></div>`, { label: T('בדיקה על הקבלה') });
+  m.el.classList.add('rc-dialog');
+  const texts = f => picks[f].map(i => tokens[i].text);
+  const shown = f => {
+    const v = L.wordValue(f, texts(f));
+    if (f === 'amount') return v ? v.toFixed(2) : '—';
+    if (f === 'date') return v ? formatDate(v, { year: true }) : '—';
+    return v || '—';
+  };
+  const draw = () => {
+    $$('.rc-w', m.el).forEach(b => {
+      const i = +b.dataset.i;
+      const on = RC_FIELDS.find(([f]) => picks[f].includes(i));
+      for (const [f] of RC_FIELDS) b.classList.toggle(f, picks[f].includes(i));
+      b.setAttribute('aria-pressed', !!on); b.title = on ? T(on[1]) : ''; // not by colour only
+    });
+    $$('.rc-chip', m.el).forEach(c => {
+      const f = c.dataset.f;
+      $('b', c).textContent = shown(f);
+      c.classList.toggle('on', f === field); c.setAttribute('aria-pressed', f === field);
+      c.classList.toggle('chg', changed.has(f));
+    });
+    const name = field && T(RC_FIELDS.find(x => x[0] === field)[1]);
+    $('.rc-hint', m.el).textContent = !field ? T('הקישו על שדה ואז על המילה הנכונה בקבלה')
+      : field === 'place' ? T('{x}: הקישו על מילים לפי הסדר · הקשה שוב מסירה', { x: name }) : T('{x}: הקישו על המילה הנכונה', { x: name });
+  };
+  $$('.rc-chip', m.el).forEach(c => c.onclick = () => { field = c.dataset.f; fresh = true; draw(); });
+  let lastAuto = '';
+  const onWord = i => {
+    const text = tokens[i].text;
+    let f = field;
+    if (!f) { // no field chosen: the word goes where it fits; place words in a row add up
+      f = L.wordValue('date', [text]) ? 'date' : L.wordValue('amount', [text]) && !/\p{L}/u.test(text) ? 'amount' : 'place';
+      fresh = !(f === 'place' && lastAuto === 'place'); lastAuto = f;
+    }
+    if (f === 'amount' && !L.wordValue('amount', [text])) return toast(T('זה לא סכום – הקישו על מספר'));
+    if (f === 'date' && !L.wordValue('date', [text])) return toast(T('זה לא תאריך – הקישו על תאריך'));
+    picks = L.tapWord(picks, f, i, fresh);
+    fresh = false; changed.add(f);
+    draw();
+  };
+  // a tap on a word, or next to one (words are small on a phone): the nearest word within 24 px
+  $('.rc-img', m.el).onclick = e => {
+    const hit = e.target.closest('.rc-w');
+    if (hit) return onWord(+hit.dataset.i);
+    let best = -1, bd = 24;
+    $$('.rc-w', m.el).forEach(b => {
+      const r = b.getBoundingClientRect();
+      const d = Math.hypot(Math.max(r.left - e.clientX, 0, e.clientX - r.right), Math.max(r.top - e.clientY, 0, e.clientY - r.bottom));
+      if (d < bd) { bd = d; best = +b.dataset.i; }
+    });
+    if (best >= 0) onWord(best);
+  };
+  $('[data-zoom]', m.el).onclick = e => { const on = $('.rc-img', m.el).classList.toggle('zoom'); e.currentTarget.setAttribute('aria-pressed', on); };
+  $('[data-x]', m.el).onclick = () => m.close();
+  $('[data-ok]', m.el).onclick = () => m.close({ picks, changed });
+  draw();
+  $('[data-x]', m.el).focus();
+  return m.result;
 }
 
 // ---------------------------------------------------------------- admin

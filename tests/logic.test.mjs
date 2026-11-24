@@ -595,3 +595,55 @@ import { unwrappedHebrew } from './i18n-keys.mjs';
 test('languages: no Hebrew text in the screens that skips translation', () => {
   assert.deepEqual(unwrappedHebrew(), []);
 });
+
+// ---------- Step 26: receipt check screen + split numbers in Hebrew lines ----------
+// Tesseract reads "84.90" on a Hebrew line as two words, "90 84" (the dot lost, the halves swapped). b = [x0, y0, x1, y1] in pixels.
+const W = (text, line, x0, x1, y0 = line * 50) => ({ text, line, b: [x0, y0, x1, y0 + 30] });
+test('receipt words: number halves next to each other become one amount', () => {
+  const words = [W('סה"כ', 0, 400, 470), W('לתשלום', 0, 300, 390), W('90', 0, 148, 180), W('84', 0, 100, 140)];
+  const tk = L.receiptTokens(words);
+  assert.deepEqual(tk.map(t => t.text), ['סה"כ', 'לתשלום', '84.90']);
+  assert.deepEqual(tk[2].b, [100, 0, 180, 30]);
+  assert.equal(L.receiptText(tk), 'סה"כ לתשלום 84.90');
+  assert.equal(L.parseReceipt(L.receiptText(tk)).amount, 84.9);
+});
+test('receipt words: numbers far apart, 3-digit halves, and times are not joined', () => {
+  const far = L.receiptTokens([W('שולחן', 0, 400, 480), W('7', 0, 360, 375), W('סועדים', 0, 200, 300), W('2', 0, 150, 165)]);
+  assert.equal(L.receiptText(far), 'שולחן 7 סועדים 2');
+  assert.equal(L.receiptText(L.receiptTokens([W('קופה', 0, 400, 480), W('16/11/26', 0, 250, 380), W('05', 0, 148, 180), W('19', 0, 100, 140)])), 'קופה 16/11/26 05 19');
+  assert.equal(L.receiptText(L.receiptTokens([W('123', 0, 148, 200), W('45', 0, 100, 140), W('סך', 1, 0, 50)])), '123 45\nסך');
+  assert.equal(L.receiptText(L.receiptTokens([W('00', 0, 185, 215), W('18', 0, 120, 150), W('סך', 1, 0, 50)])), '18.00\nסך', 'fixed-width receipt: the dot is a full character wide');
+  assert.equal(L.receiptText(L.receiptTokens([W('00', 0, 185, 215), W('x', 0, 155, 165), W('18', 0, 120, 150), W('סך', 1, 0, 50)])), '00 x 18\nסך', 'a word in between');
+  assert.equal(L.receiptText(L.receiptTokens([W('a', 0, 0, 10), W('b', 1, 0, 10)])), 'a\nb');
+  assert.equal(L.receiptText(L.receiptTokens([W('|', 0, 0, 5), W('קפה', 0, 100, 150), W('—', 0, 300, 320)])), 'קפה', 'edge lines are not words');
+  assert.equal(L.receiptText(L.receiptTokens([W('TOTALE', 0, 0, 90), W('€', 0, 100, 115), W('12,50', 0, 125, 190)])), 'TOTALE € 12,50', 'a lone currency sign stays');
+  assert.equal(L.parseReceipt(L.receiptText(L.receiptTokens([W('TOTAL', 0, 0, 90), W('€', 0, 100, 115), W('12,50', 0, 125, 190)])), { currency: 'ILS' }).currency, 'EUR');
+  assert.equal(L.receiptText(L.receiptTokens([W('x', 0, 0, 20), W('2', 0, 100, 115), W('15', 0, 125, 150)])), 'x 2 15', 'Latin receipt: "2 15" stays two numbers');
+});
+test('receipt check: the words the app picked for amount, date and place', () => {
+  const tk = L.receiptTokens([W('קפה', 0, 300, 360), W('לנדוור', 0, 200, 290), W('17/11/2026', 1, 100, 300),
+    W('טיפ', 2, 400, 450), W('00', 2, 148, 180), W('36', 2, 100, 140), W('סה"כ', 3, 400, 470), W('90', 3, 148, 180), W('84', 3, 100, 140)]);
+  const got = L.parseReceipt(L.receiptText(tk));
+  const p = L.receiptPicks(tk, got);
+  assert.deepEqual(p, { amount: [6], date: [2], place: [0, 1] });
+  assert.deepEqual(L.receiptPicks(tk, { amount: 99, date: '', details: 'nothing' }), { amount: [], date: [], place: [] });
+});
+test('receipt check: value of the tapped words', () => {
+  assert.equal(L.wordValue('amount', ['84.90']), 84.9);
+  assert.equal(L.wordValue('amount', ['₪1,234.50']), 1234.5);
+  assert.equal(L.wordValue('amount', ['טיפ']), null);
+  assert.equal(L.wordValue('amount', ['01-05-2024']), null, 'a date is not an amount');
+  assert.equal(L.wordValue('amount', ['14:32']), null, 'a time is not an amount');
+  assert.equal(L.wordValue('date', ['17/11/2026']), '2026-11-17');
+  assert.equal(L.wordValue('date', ['קפה']), '');
+  assert.equal(L.wordValue('place', ['מאפיית', 'אורנה']), 'מאפיית אורנה');
+  assert.equal(L.wordValue('place', []), '');
+});
+test('receipt check: tapping a word', () => {
+  const p = { amount: [6], date: [2], place: [0, 1] };
+  assert.deepEqual(L.tapWord(p, 'amount', 4, true), { amount: [4], date: [2], place: [0, 1] });
+  assert.deepEqual(p.amount, [6], 'does not change the old picks');
+  assert.deepEqual(L.tapWord(p, 'place', 5, true).place, [5], 'first tap on place starts again');
+  assert.deepEqual(L.tapWord(p, 'place', 5, false).place, [0, 1, 5], 'next taps add');
+  assert.deepEqual(L.tapWord(p, 'place', 0, false).place, [1], 'tap again removes');
+});

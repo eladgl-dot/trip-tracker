@@ -599,3 +599,74 @@ export function parseReceipt(text, { currency = 'EUR', categories = DEFAULT_CATE
   for (const [re, name] of CAT_WORDS) if (re.test(text) && categories.includes(name)) { category = name; break; }
   return { amount, currency: cur || currency, date: findDate(text), details, category };
 }
+
+// ---------- Step 26: receipt words (from the OCR, with their boxes) and the check screen ----------
+// word = { text, line, b: [x0, y0, x1, y1] } in image pixels. On Hebrew lines Tesseract reads "84.90" as two words "90 84":
+// the dot is lost and the halves come out swapped. Two digit-only words side by side on the same line, the right one
+// exactly 2 digits, the gap at most 1.6 × the text height (a printed dot on a fixed-width receipt), are one amount. Lines with a time or date are left alone (19:05).
+const DIGITS = /^\d{1,5}$/;
+export function receiptTokens(words) {
+  const out = [];
+  const byLine = new Map();
+  (words || []).forEach((w, i) => {
+    if (!/[\p{L}\p{N}\p{Sc}]/u.test(w.text)) return; // "|", "—": the paper's edge or a printed line, not a word (a lone "€" stays)
+    if (!byLine.has(w.line)) byLine.set(w.line, []); byLine.get(w.line).push({ ...w, ids: [i] });
+  });
+  const hebrew = (words || []).some(w => /[\u05d0-\u05ea]/.test(w.text)); // only Hebrew receipts split numbers this way
+  for (const line of byLine.values()) {
+    const timeOrDate = !hebrew || line.some(w => /\d[:/.-]\d/.test(w.text));
+    const used = new Set();
+    if (!timeOrDate) {
+      const nums = line.filter(w => DIGITS.test(w.text)).sort((a, b) => a.b[0] - b.b[0]);
+      for (let k = 0; k + 1 < nums.length; k++) {
+        const l = nums[k], r = nums[k + 1], h = Math.max(l.b[3] - l.b[1], r.b[3] - r.b[1]);
+        const gap = r.b[0] - l.b[2], midL = (l.b[1] + l.b[3]) / 2, midR = (r.b[1] + r.b[3]) / 2;
+        if (r.text.length !== 2 || l.text.length > 3 || gap < 0 || gap > 1.6 * h || Math.abs(midL - midR) > h / 2 || used.has(l) || used.has(r)) continue;
+        if (line.some(o => o !== l && o !== r && o.b[2] > l.b[2] && o.b[0] < r.b[0])) continue; // another word sits between them
+        used.add(l); used.add(r);
+        const first = line.indexOf(l) < line.indexOf(r) ? l : r;
+        first.merged = { text: `${l.text}.${r.text}`, b: [l.b[0], Math.min(l.b[1], r.b[1]), r.b[2], Math.max(l.b[3], r.b[3])], ids: [...first.ids, ...(first === l ? r : l).ids] };
+        (first === l ? r : l).drop = true;
+      }
+    }
+    for (const w of line) if (!w.drop) out.push(w.merged ? { text: w.merged.text, line: w.line, b: w.merged.b, ids: w.merged.ids } : { text: w.text, line: w.line, b: w.b, ids: w.ids });
+  }
+  return out;
+}
+export function receiptText(tokens) {
+  const lines = [];
+  for (const t of tokens) { if (!lines.length || lines[lines.length - 1].line !== t.line) lines.push({ line: t.line, words: [] }); lines[lines.length - 1].words.push(t.text); }
+  return lines.map(l => l.words.join(' ')).join('\n');
+}
+// What the tapped words mean for a field: amount → number or null, date → 'yyyy-mm-dd' or '', place → text.
+export function wordValue(field, texts) {
+  const s = (texts || []).join(' ').trim();
+  if (field === 'amount') { if (findDate(s) || /\d[:/]\d/.test(s)) return null; const m = s.replace(/[^\d.,\s]/g, '').trim().match(AMOUNT_RE); const n = m ? toNumber(m[0]) : 0; return n > 0 && n < 1e7 ? n : null; }
+  if (field === 'date') return findDate(s);
+  return s.slice(0, 60);
+}
+// The tokens the app used for each field (indexes into tokens), to colour them on the check screen.
+export function receiptPicks(tokens, got) {
+  const picks = { amount: [], date: [], place: [] };
+  const lineText = l => tokens.filter(t => t.line === l).map(t => t.text).join(' ').replace(/\s+/g, ' ').trim();
+  if (got.amount > 0) {
+    const hits = tokens.map((t, i) => i).filter(i => wordValue('amount', [tokens[i].text]) === got.amount);
+    const onTotal = hits.filter(i => TOTAL_WORDS.test(lineText(tokens[i].line)));
+    const i = (onTotal.length ? onTotal : hits).pop();
+    if (i !== undefined) picks.amount = [i];
+  }
+  if (got.date) { const i = tokens.findIndex(t => findDate(t.text) === got.date); if (i >= 0) picks.date = [i]; }
+  if (got.details) {
+    const t = tokens.find(t => lineText(t.line).slice(0, 60) === got.details);
+    if (t) picks.place = tokens.map((x, i) => i).filter(i => tokens[i].line === t.line);
+  }
+  return picks;
+}
+// One tap on the check screen. amount / date: that word. place: the first tap starts again, later taps add or remove.
+export function tapWord(picks, field, i, fresh) {
+  const next = { amount: [...picks.amount], date: [...picks.date], place: [...picks.place] };
+  if (field !== 'place') next[field] = [i];
+  else if (fresh) next.place = [i];
+  else next.place = next.place.includes(i) ? next.place.filter(x => x !== i) : [...next.place, i];
+  return next;
+}
